@@ -196,11 +196,14 @@ them (each `CloudMessage` carries a oneof command payload + an idempotency key):
 | `agent.update_prompt` | apply a new prompt version |
 | `schedule.set` | register/replace a cron/interval schedule |
 | `skill.install` | install a skill for an agent/platform |
-| `mcp.configure` | wire up an MCP server for an agent |
-| `plugin.install` | provision a capability pack (MCP/script/workspace) + attach to an agent |
-| `plugin.remove` | detach + uninstall a plugin |
+| `mcp.configure` | enable/configure an MCP server **on the daemon** (endpoint, args, credentials) |
+| `plugin.install` | provision a capability pack **on the daemon** (host-level; not yet agent-attached) |
+| `plugin.remove` | uninstall a pack from the daemon (tears down its sandbox; detaches it from all agents) |
+| `capability.attach` | **include** a daemon-available capability (MCP server / plugin / system tool) for one agent |
+| `capability.detach` | **exclude** a capability for one agent (selection only — no provisioning/teardown) |
 | `env.set` | decrypt an E2E-encrypted env var and store it in the keyring |
 | `env.delete` | remove an env var from the keyring |
+| `memory.sync` | apply Web UI memory edits/deletes/pre-loads to the local store (§4.13) |
 | `hitl.resolve` | deliver an approve/deny decision to a paused run |
 | `run.recover` | adopt + resume an interrupted run from its last-known-good checkpoint |
 | `daemon.update` | self-update the worker package |
@@ -360,7 +363,11 @@ Per-agent policy enforced **before and during** execution:
 - **Command blockers** — deny-list / allow-list for shell commands and tool calls
   (e.g. block `rm -rf`, `git push --force`, `DROP TABLE`).
 - **Path guards** — restrict filesystem writes to allowed directories.
-- **MCP gating** — control which MCP servers/tools an agent may invoke.
+- **Capability selection (MCP gating)** — choose which of the **daemon's available**
+  MCP servers, plugins, and system tools this agent may invoke. Built-in defaults
+  (filesystem/fetch/git/memory) are **auto-included**; every other capability is
+  **opt-in per agent**. This is an **agent-tier toggle** (`capability.attach/detach`) —
+  it never provisions or tears down anything on the daemon (see [§4.11](#411-plugin-runtime--capability-packs)).
 - **Network policy** — allow-list of outbound hosts.
 - **Cost/usage caps** — hard-stop a run that exceeds `max_cost_usd` or `max_tool_calls`.
 
@@ -440,15 +447,31 @@ synapse env set DEPLOY_ENV=prod --shared                    # daemon/org-wide sh
 ### 4.11 Plugin Runtime & Capability Packs
 
 Plugins are **installable capabilities** that give an agent new *actions* (vs. skills,
-which give it knowledge). A plugin is provisioned on the daemon and attached to one or
-more agents; the user installs them from the Web UI and they load onto the agent running
-on the selected daemon.
+which give it knowledge).
+
+**Two tiers — provision once on the daemon, then select per agent:**
+
+1. **Daemon tier (enabled / available).** A capability — an MCP server (`mcp.configure`),
+   or a plugin/system tool (`plugin.install`) — is provisioned **on the daemon**, where
+   its venv/process/sandbox actually lives. This is host-level and done once; it does
+   **not** by itself grant any agent access.
+2. **Agent tier (attached / included).** Each agent then **selects** which of the
+   daemon's available capabilities it may use (`capability.attach` / `capability.detach`).
+   Selection is a lightweight per-agent toggle that reuses the already-provisioned
+   capability — no re-install, no teardown. The Ruleset Engine enforces the selection at
+   run time (§4.6), so an unselected MCP server/tool is simply not callable by that agent.
+
+**Default state:** the built-in defaults below are **auto-attached** to every agent;
+**every other** capability is **opt-in** — installed on the daemon, then explicitly
+attached to the agents that should have it.
 
 #### Default (built-in) capabilities
 
-The daemon ships with a set of **default MCP servers** available to any agent without
-installation — typically `filesystem`, `fetch`/HTTP, and `git`. These are the baseline;
-everything else is an installable plugin.
+The daemon ships with a set of **default MCP servers** — typically `filesystem`,
+`fetch`/HTTP, `git`, and `memory` (the agent memory interface, §4.13). They are enabled
+on every daemon **and auto-attached to every agent** (so memory/filesystem/etc. work out
+of the box); an operator can still **detach** one from a specific agent. Everything else
+is an installable plugin that is opt-in per agent.
 
 #### Plugin kinds
 
@@ -503,29 +526,43 @@ filesystem = ["./downloads"]
 requires_hitl = false
 ```
 
-#### Install & lifecycle (on receiving `plugin.install`)
+#### Install & lifecycle
+
+**Daemon-tier provisioning** (on receiving `plugin.install` / `mcp.configure`):
 
 1. **Resolve** the manifest (from the cloud's plugin catalog / marketplace).
 2. **Check platform** compatibility against this daemon's OS.
 3. **Provision** in isolation: create a dedicated venv/workspace under
    `~/.synapse/plugins/{name}/`, install deps, run `post_install`.
-4. **Register** the plugin's MCP servers and/or script tools with the Agent Runtime and
-   apply its declared `permissions` to the Ruleset Engine.
-5. **Attach** to the target agent(s); report status (`installing → ready | failed`) and
-   the resulting tool capabilities upstream for display in the Web UI.
+4. **Register** the capability as **available on this daemon** and report status
+   (`installing → ready | failed`) + its exposed tools upstream for display in the Web UI.
+   At this point it is installed but **not yet usable by any agent**.
 
-Plugins are **versioned and removable** (`plugin.remove` detaches and tears down the
-venv/workspace). Health of long-running plugin processes (e.g. an MCP server) feeds the
-same heartbeat/uptime stream as the daemon.
+**Agent-tier attachment** (on receiving `capability.attach`):
+
+5. **Attach** the (already-provisioned) capability to the target agent: wire its MCP
+   servers / script tools into that agent's runtime and apply its declared `permissions`
+   to the agent's Ruleset Engine. `capability.detach` reverses this — the agent loses
+   access but the capability stays provisioned on the daemon for other agents.
+
+Capabilities are **versioned**. `plugin.remove` is daemon-tier: it tears down the
+venv/workspace and detaches the pack from **all** agents at once. Health of long-running
+plugin processes (e.g. an MCP server) feeds the same heartbeat/uptime stream as the daemon.
 
 #### Local CLI
 
 ```bash
+# Daemon tier — provision/enable a capability on this host
 synapse plugin search browser                       # browse the catalog
-synapse plugin install browser-use --agent web-bot  # provision + attach
-synapse plugin list --agent web-bot                 # installed + status
-synapse plugin remove browser-use --agent web-bot
+synapse plugin install browser-use                  # provision on the daemon (not yet attached)
 synapse plugin install ./my-plugin                  # install a local/unpublished pack
+synapse plugin list                                 # capabilities available on this daemon + status
+synapse plugin remove browser-use                   # tear down on the daemon (detaches everywhere)
+
+# Agent tier — select which available capabilities an agent may use
+synapse agent attach browser-use --agent web-bot    # include for this agent
+synapse agent detach browser-use --agent web-bot    # exclude (no teardown)
+synapse agent capabilities --agent web-bot          # what this agent currently has attached
 ```
 
 #### Isolation & safety
@@ -599,6 +636,82 @@ On resume the runtime reads the journal:
 honors the idempotency/HITL safety check above, so "without manual intervention" never
 means "blindly repeat a dangerous action."
 
+### 4.13 Agent Memory Interface & Storage Providers
+
+Every agent gets **persistent memory out of the box** — a place to store facts, results,
+and learned context that survives across runs (distinct from a run's *session memory* in
+§4.12, which is the in-flight conversation state used for resume). Memory is **local-first**
+on the daemon and **synced on demand** so the Web UI can inspect and correct it.
+
+#### Built-in memory API
+
+The daemon core exposes a standard interface to every agent, regardless of type:
+
+```python
+agent.memory.store(key, value, *, tags=[], namespace="default")
+agent.memory.query(search_term, *, k=10, namespace="default")  # text or semantic
+agent.memory.get(key, *, namespace="default")
+agent.memory.list(*, namespace="default", limit=100)
+agent.memory.delete(key, *, namespace="default")
+```
+
+It is surfaced two ways:
+
+- To **API agents** — programmatically, as part of the runtime's agent object.
+- To **CLI / tool-using agents** — via a built-in **`memory` MCP server** (one of the
+  default MCP servers, §4.11), so `claude`/`aider`-style agents call `memory.store` /
+  `memory.query` as ordinary tools.
+
+The interface is **provider-agnostic**: the same calls work whether the backing store is
+plain SQLite or a vector DB. Writes go through the **§4.5 Input/Output Filtering** path so
+secrets/PII are redacted *before* anything is persisted or later synced.
+
+#### Storage Provider plugin (swappable)
+
+The actual storage is a **plugin** (a `script`/`composite` capability pack, §4.11) so it
+can be swapped per agent or per daemon without changing agent code:
+
+| Provider | Backing | Use | Status |
+|----------|---------|-----|--------|
+| **`sqlite-memory`** (default, built-in) | a local SQLite table in the daemon store | key/value + tag/substring search; zero setup | installed |
+| **`vector-memory`** | Chroma or Qdrant in a **local Docker container** on the host | semantic `query()` over embeddings | installable |
+| **`enterprise-memory`** | encrypted cloud bucket / centralized DB | org-shared memory | future / TBD |
+
+- The default provider needs **no dependencies** — memory works the moment an agent runs.
+- `vector-memory` declares a **Docker dependency**; on install the daemon pulls/starts the
+  container and registers it. If Docker is unavailable the install fails cleanly and the
+  agent **gracefully falls back** to `sqlite-memory` (substring instead of semantic search)
+  rather than losing memory entirely.
+- Providers implement a small contract (`store/get/query/list/delete` + an
+  `export_delta()` for sync), so a new backend is just a new plugin.
+
+#### Local-first reads/writes + Sync-on-Demand
+
+Speed is priority #1, so agents **always read and write the local provider** — no cloud
+round-trip on the hot path. Cloud sync is a **background delta**, not a per-access stream:
+
+1. **Local-first** — `store`/`delete` mutate the local provider immediately and append a
+   row to a local **memory-change journal** (key, op, namespace, redacted value, version).
+2. **Background sync** — a low-priority task batches the journal into a **memory delta**,
+   runs it through §4.5 Layer A redaction, and ships it to the cloud over the `Connect`
+   stream (`memory.delta` upstream message). The cloud keeps a **redacted snapshot** per
+   agent for the Web UI Memory Editor (web-ui §4) — it is **not** streaming every access.
+3. **Cloud → daemon edits** — when an operator edits/deletes/pre-loads a memory entry in
+   the Web UI, the cloud sends a **`memory.sync`** command (§4.2) carrying the changed
+   entries; the daemon applies them to the **local provider** (the source of truth for the
+   agent) and acks. Pre-loading a dataset before first run is the same path.
+
+#### Trust boundary (important — memory is *not* E2E-encrypted)
+
+Unlike env-var values (§4.10) and checkpoints (§4.12), which are **E2E-encrypted** and
+opaque to the cloud, **memory snapshots are stored cloud-side as redacted plaintext**,
+protected by **Supabase RLS + encryption-at-rest** — *not* zero-knowledge. This is a
+deliberate trade-off: the user explicitly needs the Web UI to **read and edit** memory
+(debugging, HITL correction of a false memory, knowledge transfer/pre-load, analytics).
+On-device §4.5 redaction is therefore the **last line of defense** — secrets/PII are
+stripped before a memory entry can ever leave the machine, so what the cloud holds is
+already sanitized. Sensitive raw values belong in the env-var vault, never in memory.
+
 ---
 
 ## 5. Security Posture
@@ -645,6 +758,7 @@ means "blindly repeat a dangerous action."
 | Wire format | Protocol Buffers (`grpcio-tools` codegen) |
 | Scheduler | APScheduler |
 | Local store | SQLite (WAL) |
+| Agent memory | SQLite (default) · Chroma/Qdrant in Docker (vector provider) |
 | PII detection | regex + entropy + optional Presidio |
 | Service mgmt | systemd / launchd / Windows Service |
 | Secret / env-var storage | OS keychain (`keyring`) |

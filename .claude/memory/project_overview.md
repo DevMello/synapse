@@ -60,6 +60,26 @@ in isolated venvs/sandboxes and attached per-agent, installed one-click from the
 MCP servers (filesystem, fetch, git). Plugin kinds: mcp/script/workspace/composite.
 Details in docs/tui-daemon.md §4.11.
 
+**Two-tier capability model (decided 2026-05-31):** capabilities (MCP servers / plugins /
+system tools) are **provisioned per-daemon, then selected per-agent** — never installed
+straight onto an agent. (1) **Daemon tier** — `plugin.install`/`mcp.configure` provisions
+the venv/process on the host (data: `daemon_capabilities`); makes it *available* but grants
+no agent access. (2) **Agent tier** — `capability.attach`/`capability.detach` toggles which
+of the daemon's available capabilities each agent may use (data: `agent_capabilities`);
+instant, no re-install/teardown. **Default state = "defaults on, rest off"**: built-in
+defaults (filesystem/fetch/git/**memory** MCP) are **auto-attached** to every agent (still
+detachable per agent); every other capability is **opt-in per agent**. The Ruleset Engine's
+"MCP gating" IS this agent-tier selection (so an unselected server/tool is simply not
+callable). `plugin.remove` is daemon-tier (tears down + detaches from ALL agents). Web UI:
+daemon tier on the Daemons page §4.2 (enable/configure on host), agent tier on the agent's
+Tools/MCP + Plugins tabs §4.7 (toggle on/off). **Existing agent permission controls
+(editable in web-ui §4.7, enforced by daemon Ruleset Engine §4.6):** command blockers
+(allow/deny shell+tool calls = script execution), write-path guards, network host
+allow-list, cost/tool-call caps, capability/MCP gating — each action block/require-HITL/warn,
+per-agent over an org default. **Known gap (left as-is 2026-05-31):** filesystem *reads*
+are NOT a first-class ruleset dimension — only the file-explorer plugin scopes reads to
+bounded paths; writes are guarded but general read-path guarding was deliberately deferred.
+
 **Input/Output Filtering middleware (on-device guardrails, tui-daemon.md §4.5):** two
 layers run before content is acted on or uploaded. Layer A = PII/secret redaction
 (regex/entropy/Presidio + user rules; salted tokens like `<REDACTED:API_KEY:a91f>`;
@@ -87,6 +107,26 @@ the cloud stores opaque blobs + plaintext metadata only, and ANY authorized daem
 org can decrypt to resume after total local loss. Recovery: cloud detects heartbeat loss
 → run `interrupted`; on reconnect daemon `run.reconcile` uploads offline work; cloud can
 `run.recover` onto another daemon. Details: docs/tui-daemon.md §4.12, cloud-backend.md §13.
+
+**Agent Memory subsystem (decided 2026-05-31, tui-daemon §4.13):** every agent gets a
+built-in persistent **memory API** (`agent.memory.store/query/get/list/delete`), surfaced
+to CLI agents via a default **`memory` MCP server** and to API agents programmatically.
+Storage is a **swappable Storage Provider plugin**: default `sqlite-memory` (local SQLite,
+zero-setup), `vector-memory` (Chroma/Qdrant in a local **Docker** container for semantic
+search; graceful fallback to SQLite if Docker absent), enterprise (future). Reads/writes
+are **local-first** (speed); cloud sync is **Sync-on-Demand** — a background **`memory.delta`**
+(redacted via §4.5 Layer A before upload) keeps a cloud snapshot; Web UI edits/pre-loads
+round-trip back via a **`memory.sync`** command applied to the daemon's local store (the
+source of truth). **KEY TRUST DECISION: agent memory is NOT E2E-encrypted** — unlike env
+vars and checkpoints, the cloud stores it as **redacted plaintext under Supabase RLS +
+encryption-at-rest**, *deliberately*, because the product requires the Web UI to read/edit
+memory (debugging, HITL correction of false memories, knowledge-transfer pre-load,
+analytics like "400 entries / 50MB"). On-device redaction is the guarantee that no raw
+secret reaches the snapshot; raw secrets belong in the env-var vault, never in memory.
+Data: cloud `agent_memory` table (redacted key/value/text, tags, optional embedding_ref,
+version, bytes, updated_by) + per-agent rollups. Web UI: **Memory tab / Memory Editor**
+(web-ui §4.17). Distinct from checkpoint "session memory" (§4.12 = in-flight conversation
+state for resume, which IS E2E-encrypted).
 
 **Why:** the design centers a tight trust boundary — execution + secrets + redaction
 stay on the user's machine; the cloud is broker + historian + analytics only.

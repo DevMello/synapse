@@ -64,6 +64,7 @@ Synapse
 │       ├── Tools/MCP  (gateways, MCP servers, blockers)
 │       ├── Plugins    (install capability packs onto this agent's daemon)
 │       ├── Environment(env vars — E2E encrypted to the daemon, write-only)
+│       ├── Memory     (view/search/edit/pre-load persistent agent memory)
 │       ├── Runs       (history + live trace viewer)
 │       ├── Logs       (access logs, tool logs — redaction-aware)
 │       └── Analytics  (tokens, spend, latency, tasks, tool calls)
@@ -103,6 +104,12 @@ Fleet-wide health at a glance:
   connection — for a lost laptop or decommissioned VPS — **without changing the user's
   password** and without touching any other daemon. Shows a confirm dialog with the
   device's identity so the right session is killed.
+- **Capabilities** (per daemon) — the *daemon tier* of the two-tier capability model:
+  enable/install **MCP servers, plugins, and system tools on this host** (where their
+  venv/process lives) and configure each (endpoint, args, version). Each shows
+  `installing → ready | failed`. Enabling here makes a capability **available** on the
+  daemon but does **not** grant any agent access — that's selected per agent (§4.7).
+  Removing a capability here detaches it from **all** the daemon's agents at once.
 
 #### Pairing a new daemon (device-code login)
 
@@ -160,12 +167,26 @@ Everything that defines an agent's behavior is editable **online**:
 
 ### 4.7 Tools, MCP, Plugins & Blockers
 
-**Tools / MCP / blockers**
+**Tools / MCP / blockers** — *agent-tier capability selection*
 
-- Configure **MCP servers** and **gateways** the agent may use.
+This tab is the **agent tier** of the two-tier model (the *daemon tier* — what's actually
+installed on the host — lives on the Daemons page, §4.2):
+
+- **Capability toggles**: a checklist of every capability **available on this agent's
+  daemon** — MCP servers, plugins, and system tools — each with an **include/exclude**
+  toggle for *this agent*. Toggling is instant (`capability.attach`/`detach`) — it does
+  **not** install or tear anything down; it only selects from what the daemon already has.
+- **Defaults**: built-in capabilities (filesystem, fetch, git, memory MCP) show as
+  **on by default**; the operator can still detach one for this agent. Everything else is
+  **off until explicitly toggled on**.
+- **Greyed-out / "install on daemon first"**: a capability not yet enabled on the host
+  appears disabled with a shortcut to enable it on the Daemons page — keeping the two
+  tiers visibly distinct.
+- **Gateways** the agent may use are configured here too.
 - Define **rulesets/blockers**: denied commands, path guards, network allow-lists,
-  cost/tool-call caps, and which actions require **HITL approval**.
-- Each rule's severity (block / require-approval / warn) is set here.
+  cost/tool-call caps, and which actions require **HITL approval**. Each rule's severity
+  (block / require-approval / warn) is set here. The capability toggles above are the
+  enforcement surface for "MCP gating" (tui-daemon §4.6).
 
 **Input/Output Filtering (guardrails)** — the *Filtering* panel
 
@@ -189,24 +210,27 @@ redacted excerpt — and surface live in **Logs** (§4.10) and **Alerts** (§4.1
 
 **Plugins (capability packs)** — the *Plugins* tab
 
-Plugins give an agent new **actions** (vs. skills, which give it knowledge). Install
-them from the web and they load onto the agent running on the selected daemon.
+Plugins give an agent new **actions** (vs. skills, which give it knowledge). Installing
+follows the **two tiers**: provision on a daemon, then attach to an agent.
 
 - **Defaults shown**: every agent lists its built-in capabilities (default MCP servers:
-  filesystem, fetch, git) as always-available.
-- **Browse & install**: from the agent's *Plugins* tab or the **Marketplace**, pick a
-  pack and **one-click install** onto this agent's host daemon. Packs include
-  **browser use** (Playwright automation), **terminal use** (sandboxed shell), **file
-  explorer** (scoped FS tools), **MCP quick-installs** (GitHub, Slack, Postgres…), and
-  **custom coding environments** (per-project virtualenvs/workspaces for `claude`/
-  `aider` agents).
+  filesystem, fetch, git, memory) as **auto-attached** (detachable per agent).
+- **Provision (daemon tier)**: from the **Marketplace** or the Daemons page (§4.2), pick
+  a pack and **one-click enable** it on a chosen daemon — this creates the venv/workspace
+  and registers its MCP servers/tools on the host. Packs include **browser use**
+  (Playwright automation), **terminal use** (sandboxed shell), **file explorer** (scoped
+  FS read/write tools), **MCP quick-installs** (GitHub, Slack, Postgres…), and **custom
+  coding environments** (per-project virtualenvs/workspaces for `claude`/`aider` agents).
+- **Attach (agent tier)**: once a pack is `ready` on the daemon, **toggle it on for this
+  agent** here (or in *Tools/MCP*). Attaching is instant and reuses the provisioned pack —
+  no re-install. The same daemon's other agents stay unaffected until individually toggled.
 - **Live install status**: a pack shows `installing → ready | failed` as the daemon
-  provisions it (creates the venv/workspace, installs deps, registers MCP servers/
-  tools). Failures surface the install log.
+  provisions it. Failures surface the install log.
 - **Per-platform**: the UI only offers packs compatible with the target daemon's OS;
   the same agent can carry different packs on different daemons.
 - **Manage**: view each pack's exposed tools and declared **permissions** (network/
-  filesystem/HITL), pin versions, update, or remove (which tears down its sandbox).
+  filesystem/HITL), pin versions, update, detach from this agent, or remove from the
+  daemon (which tears down its sandbox and detaches it from all agents).
 - **Custom packs**: install an unpublished/local plugin by reference for private tools.
 
 See [tui-daemon.md](tui-daemon.md) §4.11 for how packs are provisioned and sandboxed,
@@ -321,6 +345,37 @@ Deep, per-agent and fleet-wide:
 - Org profile, **members & roles** (owner/admin/operator/viewer), billing/usage,
   and API tokens. Roles gate who can deploy, edit, approve HITL, and view secrets-
   adjacent data.
+
+### 4.17 Memory Editor (the agent's *Memory* tab)
+
+Every agent has **persistent memory** it reads/writes across runs (tui-daemon §4.13).
+Unlike env vars, this memory is **visible and editable** here — the Web UI is the
+debugging, correction, and knowledge-transfer surface for it.
+
+- **Browse & search**: a table of memory entries per agent — `key`, value/text preview,
+  `tags`, `namespace`, size, last-updated. Full-text (and, on a vector provider,
+  **semantic**) search across entries.
+- **Why it's visible** (and env vars aren't): memory is **redacted on-device** (§4.5
+  Layer A strips secrets/PII *before* sync) and stored cloud-side as **RLS-scoped
+  redacted plaintext** — explicitly **not** E2E-encrypted. That trade-off is what lets
+  the operator actually read and fix it. Truly secret values belong in **Environment**
+  (§4.8), never in memory.
+- **HITL correction**: when an agent misbehaves, open Memory to check whether it
+  **hallucinated or read a wrong fact**. Edit or delete a bad entry inline; the change is
+  written cloud-side and pushed to the daemon (`memory.sync`) so the **local store** (the
+  source of truth) is corrected before the next run.
+- **Pre-load / knowledge transfer**: bulk-add entries (instructions, a dataset, seed
+  facts) **before first run** — the editor becomes a seeding tool; the cloud syncs the
+  rows down to the daemon's local provider.
+- **Analytics**: per-agent memory footprint — entry count and total size ("Agent A: 400
+  entries, 50 MB"), provider in use (SQLite vs. vector), and growth over time, so an
+  operator can spot runaway memory.
+- **Provider selection**: choose the agent's **Storage Provider** — default `sqlite-
+  memory`, or `vector-memory` (Chroma/Qdrant in a Docker container on the daemon) for
+  semantic recall; surfaced as a plugin install on the agent's daemon.
+- **Sync model**: reads come from the **cloud snapshot** (synced on demand from the
+  daemon — not a live per-access stream), so the tab is fast; edits round-trip back to
+  the daemon. Audit log records every operator edit/delete/pre-load.
 
 ---
 

@@ -93,11 +93,13 @@ RBAC-checks, persists, and publishes to the target daemon's channel:
 | Run now | create `runs` row (pending) | `agent.run` |
 | Cancel run | update `runs` | `agent.cancel` |
 | Install from marketplace | resolve listing | `agent.deploy` / `skill.install` |
-| Install plugin (capability pack) | track `plugin_installs` | `plugin.install` |
-| Remove plugin | update `plugin_installs` | `plugin.remove` |
-| Configure MCP / blockers | persist policy | `mcp.configure` |
+| Enable capability **on a daemon** | track `daemon_capabilities` | `plugin.install` / `mcp.configure` |
+| Remove capability from a daemon | update `daemon_capabilities` | `plugin.remove` |
+| Attach/detach capability **for an agent** | track `agent_capabilities` | `capability.attach` / `capability.detach` |
+| Configure blockers / rulesets | persist policy | `mcp.configure` (+ ruleset sync) |
 | Set env var (E2E encrypted) | store name only, relay ciphertext | `env.set` |
 | Delete env var | drop metadata row | `env.delete` |
+| Edit / delete / pre-load agent memory | write `agent_memory` snapshot | `memory.sync` |
 | Approve/deny HITL | write audit + decision | `hitl.resolve` |
 | Resume interrupted run | mark `recovering`, hand off checkpoint | `run.recover` |
 | Rollback to version | set `current_version` | `agent.update_prompt` |
@@ -117,6 +119,7 @@ blobs) **and** publishes it to a Supabase Realtime channel for any subscribed br
 | token usage + cost | aggregate metrics | analytics, running cost |
 | run finished (status, totals) | finalize `runs` | run history, notification |
 | checkpoint delta (encrypted) | store blob + metadata (`run_checkpoints`) | run progress |
+| `memory.delta` (redacted, background) | upsert `agent_memory` snapshot + rollups | Memory tab entries, size analytics |
 | `run.reconcile` (on reconnect) | diff state, ingest offline work | resumed/“recovered” status |
 | `hitl.request` | create gate, fan out | approvals queue + Slack/Discord/Email |
 | heartbeat / health | update presence | daemon uptime |
@@ -258,23 +261,34 @@ At run time: daemon injects keyring vars into the agent's process env.
 The cloud never held the value; compromising the cloud yields names, not secrets.
 ```
 
-### 4.7 Install a plugin (capability pack) from the web
+### 4.7 Enable a capability on a daemon, then attach it to an agent (two-tier)
 
 ```
-Browser: Marketplace/Plugins → "browser-use" → Install → pick daemon "macbook-01", agent "web-bot"
-   ▼  REST: plugin.install { plugin: browser-use@1.4.0, agent: web-bot }
-Cloud:  RBAC check → verify platform compat → write plugin_installs(status=installing)
+─ TIER 1: provision on the daemon (once per host) ─
+Browser: Daemon "macbook-01" → Capabilities → "browser-use" → Enable
+   ▼  REST: plugin.install { plugin: browser-use@1.4.0, daemon: macbook-01 }
+Cloud:  RBAC check → verify platform compat → write daemon_capabilities(status=installing)
         send manifest + checksum → publish plugin.install over hub
    ▼  gRPC Connect stream → org:acme:daemon:macbook-01
 Daemon: verify checksum → create isolated venv → install deps → playwright install
-        register `browser` MCP server + tools → apply declared permissions (Ruleset)
-        attach to agent web-bot → stream status: installing → ready (+ tool list)
+        register `browser` MCP server + tools → stream status: installing → ready (+ tool list)
    ▼  status/capabilities flow up via IngestTelemetry → Supabase Realtime
-Browser: plugin shows "ready"; web-bot now has browser tools on its next run
+Browser: capability shows "ready on macbook-01" — available, but NOT yet usable by any agent
+
+─ TIER 2: select for an agent (per agent, no re-install) ─
+Browser: Agent "web-bot" → Tools/MCP → toggle "browser-use" ON
+   ▼  REST: capability.attach { agent: web-bot, capability: browser-use }
+Cloud:  write agent_capabilities(enabled=true) → publish capability.attach over hub
    ▼
-(next run) Daemon: agent can navigate/click/screenshot via the browser MCP server,
-                   all actions governed by blockers + redaction.
+Daemon: wire browser MCP/tools into web-bot's runtime → apply declared permissions (Ruleset)
+   ▼
+(next run) Daemon: web-bot can navigate/click/screenshot via the browser MCP server;
+                   another agent on macbook-01 WITHOUT the toggle cannot — same host,
+                   different selection. All actions governed by blockers + redaction.
 ```
+
+Built-in defaults (filesystem/fetch/git/memory) skip tier 2 — they're auto-attached to
+every agent; an operator can still toggle one off for a specific agent.
 
 ### 4.8 Crash/blip mid-run → checkpointed resume (no work lost)
 
@@ -302,6 +316,32 @@ Daemon2: pulls last-known-good checkpoint (encrypted) → decrypts with ORG RECO
    ▼  (mid-tool intent without result → re-run if idempotent, else pause for HITL)
 ```
 
+### 4.9 Inspect & correct an agent's memory (HITL / pre-load)
+
+```
+Agent run: agent.memory.store("customer_tier", "gold")  → local provider (SQLite/vector)
+           write passes §4.5 redaction → appended to local memory-change journal
+   ▼  background sync (not per-access)
+Daemon: memory.delta { redacted entries } ──► Cloud upserts agent_memory snapshot + rollups
+
+─ debugging: agent acted strangely ─
+Operator: opens agent's "Memory" tab → Cloud serves latest snapshot (RLS)
+          spots a false entry ("customer_tier=platinum" — hallucinated)
+   ▼  edits it to "gold" / deletes it
+Cloud:  write agent_memory (updated_by=operator) + audit → memory.sync ──► owning daemon
+Daemon: applies edit to LOCAL provider (source of truth) → acks
+   ▼
+Next run: agent reads the corrected value locally.
+
+─ knowledge transfer: pre-load before first run ─
+Operator: Memory Editor → bulk-add instructions/dataset entries
+Cloud:  agent_memory rows → memory.sync ──► daemon seeds local store before the agent starts
+```
+
+Note: memory is **redacted plaintext under RLS**, *not* E2E-encrypted (unlike env vars /
+checkpoints) — precisely so the Web UI can read and correct it. On-device redaction
+guarantees no raw secret reaches the snapshot.
+
 ---
 
 ## 5. Where Each Responsibility Lives
@@ -317,11 +357,12 @@ Daemon2: pulls last-known-good checkpoint (encrypted) → decrypts with ORG RECO
 | PII / secret redaction | shows markers | stores redacted | **redacts on-device** |
 | Prompt-injection / jailbreak guard | configures policy + shows findings | baselines + alerts on spikes | **screens in/out, neutralizes, enforces** |
 | Rulesets / blockers | authored | stored | **enforced** |
-| Plugins / capabilities | browse + install | catalog + relay + status | **provisions (venv/MCP), sandboxes, runs** |
+| Capabilities (MCP / plugins / tools) | enable on daemon + select per agent (toggle) | catalog + track daemon-tier & agent-tier + relay | **provisions (venv/MCP) once, attaches per agent, sandboxes, runs** |
 | HITL gate | resolves | routes + fans out | **pauses/resumes** |
 | Scheduling | authored | stored | **fires (APScheduler)** |
 | Run history / logs / audit | views | **system of record** | buffers + ships |
 | Checkpointing / resume | shows status + override | detect loss, hold encrypted last-known-good, orchestrate | **journals locally, auto-resumes, decrypts to recover** |
+| Agent memory | view / search / edit / pre-load (Memory Editor) | stores **redacted** snapshot (RLS, not E2E), relays edits | **local-first store (SQLite/vector), redacts, syncs deltas** |
 | Analytics / anomaly detection | views | **computes** | emits metrics |
 | Versioning / rollback | UI + diff | **immutable store** | applies version |
 | Uptime monitoring | views | **derives from heartbeats** | heartbeats |

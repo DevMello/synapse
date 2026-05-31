@@ -168,6 +168,13 @@ Core entities:
 - **run_checkpoints** — durable last-known-good state per run: **plaintext metadata**
   (sequence number, step cursor, status, cost-so-far, daemon) + a reference to the
   **E2E-encrypted payload blob** (agent memory/state) the cloud cannot read (see §13).
+- **agent_memory** — **redacted snapshot** of an agent's persistent memory (tui-daemon
+  §4.13), synced on demand from the daemon: `agent_id`, `namespace`, `key`, redacted
+  `value`/text, `tags`, optional `embedding_ref`, `version`, `bytes`, `updated_at`,
+  `updated_by` (daemon vs. a Web UI operator). Unlike `run_checkpoints`/env vars this is
+  **not** E2E-encrypted — it is **RLS-scoped redacted plaintext** so the Web UI Memory
+  Editor can read/edit it (see §13.5). Per-agent rollups (`entry_count`, `total_bytes`,
+  `provider`) power the memory analytics view.
 - **tool_calls** — per-run tool invocations: name, args (redacted), result (redacted),
   latency, cost.
 - **audit_events** — immutable, append-only decision/action log (see Auditability §9).
@@ -180,8 +187,15 @@ Core entities:
 - **plugins** — catalog of installable capability packs: name, kind
   (mcp/script/workspace/composite), versions, platform compatibility, declared
   permissions, manifest ref, checksum/signature, ratings.
-- **plugin_installs** — which plugin version is attached to which agent on which daemon,
-  plus install status (`installing/ready/failed`) and exposed-tool capabilities.
+- **daemon_capabilities** — *daemon tier*: what is **provisioned/enabled on each daemon**
+  — `daemon_id`, capability ref (plugin version or configured MCP server), kind, install
+  status (`installing/ready/failed`), exposed tools, configured endpoint/args (MCP). A
+  capability must exist here before any agent can attach it.
+- **agent_capabilities** — *agent tier*: the **per-agent selection** of which
+  `daemon_capabilities` an agent may use — `agent_id`, `daemon_capability_id`, `enabled`,
+  `attached_by`, `attached_at`. Built-in defaults (filesystem/fetch/git/memory) are
+  represented as **auto-attached** (default-on); all other capabilities are opt-in rows.
+  This is the source the Ruleset Engine's capability-gating is derived from.
 - **marketplace_listings / installs** — published agents, skills & plugins, and installs.
 
 High-volume, append-heavy data (raw **logs**, **metrics**, **reasoning traces**) lives
@@ -210,6 +224,9 @@ org's rows — even through the auto-generated Supabase data APIs.
 - **Custom daemon gRPC service** (`DaemonLink` over HTTP/2) for the daemon control link
   (commands, telemetry, HITL).
 - **Supabase Realtime** for browser-facing live updates.
+- **Agent memory**: read the redacted snapshot via the RLS data API; edits/pre-loads go
+  through REST (`/agents/{id}/memory`) which writes `agent_memory` and emits a
+  `memory.sync` command to the owning daemon (§13.5).
 - **Inbound webhook endpoints** (`/hooks/{token}`) that authenticate, validate, and
   translate external events into `agent.run` commands routed to the right daemon.
 - **Daemon auth endpoints**: `POST /auth/device/code`, `POST /auth/device/token`
@@ -435,9 +452,11 @@ The cloud brokers agent env vars **without ever being able to read their values*
 - Listings carry metadata: description, platform compatibility, required tools/MCP,
   permissions requested, versioning, ratings, and (for plugins) the **manifest +
   checksum/signature** the daemon verifies before provisioning.
-- **One-click install** resolves a listing and pushes it to a chosen daemon (and agent)
-  via `agent.deploy` / `skill.install` / `plugin.install`. The cloud tracks
-  `plugin_installs` status reported back by the daemon (`installing/ready/failed`).
+- **One-click install** is **two-tier** (see tui-daemon §4.11): `plugin.install` /
+  `mcp.configure` provisions a capability **on a chosen daemon** (tracked in
+  `daemon_capabilities`, status `installing/ready/failed`); `capability.attach` /
+  `capability.detach` then toggles it **per agent** (tracked in `agent_capabilities`).
+  Built-in defaults are auto-attached; everything else is opt-in per agent.
 - Supports importing from **existing external marketplaces** (published skill packs,
   **MCP registries**) via adapters — an external MCP server becomes an `mcp`-kind plugin.
 - Skills and plugins are **platform-scoped**: the same agent can carry different
@@ -506,6 +525,30 @@ which daemon resumes.
 - **Web UI**: surfaces run status (`interrupted/recovering/resumed`), recovery alerts,
   and a manual "resume / restart / abort" override gated by the agent's resume policy.
 
+### 13.5 Agent Memory Sync & Editor
+
+The cloud is the **historian and editing surface** for agent memory (tui-daemon §4.13) —
+never the source of truth (the daemon's local provider is). Flow:
+
+- **Delta ingest**: daemons push **`memory.delta`** messages (redacted on-device via §4.5
+  Layer A) on the `Connect` stream. The cloud upserts the `agent_memory` snapshot and
+  recomputes per-agent rollups (`entry_count`, `total_bytes`). This is **sync-on-demand /
+  background**, not a per-access stream — memory reads/writes stay local on the hot path.
+- **Serve to Web UI**: the Memory Editor (web-ui §4) reads the latest snapshot via the
+  RLS-scoped data API. Operators can **search, view, edit, delete, and pre-load** entries
+  (knowledge transfer before first run) and see analytics ("Agent A: 400 entries, 50 MB").
+- **Push edits back**: a Web UI edit/delete/pre-load writes the `agent_memory` row
+  (`updated_by` = operator) and emits a **`memory.sync`** command to the owning daemon,
+  which applies it to the **local provider** and acks. The daemon store remains
+  authoritative; the cloud copy converges on the next ack/delta.
+- **Trust boundary**: `agent_memory` is **redacted plaintext under RLS + encryption-at-
+  rest**, *not* E2E-encrypted — a deliberate exception from checkpoints/env vars because
+  the product requires the Web UI to read and correct memory. On-device redaction is the
+  guarantee that no raw secret reaches this table; raw secrets belong in the env-var vault
+  (§10.5), never in memory.
+- **Audit**: operator memory edits/deletes/pre-loads are written to the immutable audit
+  log (§9) with before/after redacted values.
+
 ---
 
 ## 14. Tech Stack Summary
@@ -514,6 +557,7 @@ which daemon resumes.
 |---------|--------|
 | API framework | FastAPI (Python) |
 | Records + audit DB | **Supabase Postgres** (with RLS) |
+| Agent memory snapshot | **Supabase Postgres** (`agent_memory`, redacted + RLS, not E2E) |
 | Telemetry DB | **Supabase Postgres**, partitioned (TimescaleDB optional); ClickHouse only at scale |
 | Blob storage | **Supabase Storage** (S3-backed) |
 | Browser realtime | **Supabase Realtime** (Broadcast + Presence) |
