@@ -39,68 +39,85 @@ Its responsibilities:
 ## 2. High-Level Architecture
 
 ```
-                       ┌────────────────────────────────────────────┐
-   Browsers  ──WSS──►  │             API / Realtime Tier            │
-   (Web UI)  ──HTTPS─► │  ┌──────────────┐   ┌───────────────────┐  │
-                       │  │ REST/GraphQL │   │  WebSocket Hub     │  │
-   Daemons   ──WSS──►  │  │  (FastAPI)   │   │  (stateless +      │  │
-   (TUI)               │  └──────┬───────┘   │   Redis pub/sub)   │  │
-                       │         │           └─────────┬─────────┘  │
-                       └─────────┼─────────────────────┼────────────┘
-                                 │                      │
-              ┌──────────────────┼──────────────────────┼─────────────────┐
-              ▼                  ▼                      ▼                  ▼
-        ┌───────────┐    ┌──────────────┐      ┌──────────────┐   ┌──────────────┐
-        │ Postgres  │    │ Redis        │      │ Timeseries / │   │ Object Store │
-        │ (records, │    │ (pub/sub,    │      │ ClickHouse   │   │ (S3: large   │
-        │  audit)   │    │  presence,   │      │ (logs,       │   │  log blobs,  │
-        │           │    │  rate limit) │      │  metrics)    │   │  artifacts)  │
-        └───────────┘    └──────────────┘      └──────────────┘   └──────────────┘
-              ▲                                        ▲
-              │            ┌──────────────────────────┐│
-              └────────────┤  Async Workers (Celery)  ├┘
-                           │  - analytics rollups     │
-                           │  - anomaly detection     │
-                           │  - notification fan-out  │
-                           │  - webhook processing    │
-                           └──────────────────────────┘
+                       ┌────────────────────────────────────────────────┐
+   Daemons   ──WSS──►  │           Custom Realtime Tier (FastAPI)        │
+   (TUI)               │  ┌──────────────┐   ┌────────────────────────┐  │
+                       │  │ REST API     │   │  Daemon WebSocket Hub   │  │
+                       │  │ (FastAPI)    │   │  (device-token auth,    │  │
+                       │  └──────┬───────┘   │   strict delivery/HITL) │  │
+                       │         │           └────────────┬───────────┘  │
+                       └─────────┼────────────────────────┼──────────────┘
+                                 │                         │
+   Browsers  ──HTTPS───────────► │ (REST)                  │ (publishes telemetry)
+   (Web UI)  ──WSS───────────────┼──────────► Supabase Realtime ◄──────┘
+                                 │            (Broadcast + Presence → browser fan-out)
+              ┌──────────────────┼──────────────────────────────────────────┐
+              ▼                  ▼                          ▼                ▼
+        ┌──────────────────────────────────────┐   ┌──────────────┐  ┌────────────┐
+        │            SUPABASE                   │   │ Async Workers│  │  (optional)│
+        │  ┌────────────┐  ┌────────────────┐   │   │  (Celery/Arq)│  │  ClickHouse│
+        │  │ Postgres   │  │ Auth (GoTrue)  │   │   │ - rollups    │  │  added ONLY│
+        │  │ + RLS      │  │ user/browser   │   │   │ - anomaly    │  │  if Postgres│
+        │  │ records,   │  └────────────────┘   │   │ - notify     │  │  analytics  │
+        │  │ audit,     │  ┌────────────────┐   │   │ - webhooks   │  │  outgrows   │
+        │  │ telemetry  │  │ Storage (S3)   │   │   └──────────────┘  │  partitions│
+        │  │ (partition)│  │ blobs/traces   │   │                     └────────────┘
+        │  └────────────┘  └────────────────┘   │
+        └──────────────────────────────────────┘
 ```
+
+> **Stack note:** Supabase consolidates Postgres (records + audit + telemetry),
+> Auth (browser/user identity), Storage (blobs), and Realtime (browser fan-out) into
+> one managed service. A **thin custom FastAPI WebSocket hub** is kept *only* for the
+> daemon control link, which needs device-token auth and strict at-least-once delivery
+> for commands/HITL that Supabase Realtime isn't shaped for. **ClickHouse is dropped
+> from the MVP** — partitioned Postgres handles telemetry; revisit only if aggregation
+> queries actually degrade.
 
 ---
 
-## 3. Real-Time WebSocket Hub
+## 3. Real-Time Layer
 
-The defining feature of the backend. Two classes of socket connect:
+Synapse splits the real-time layer in two, because the daemon link and the browser link
+have very different requirements:
 
-- **Daemon sockets** — one per worker, authenticated with the daemon token.
-- **Browser sockets** — one (or more) per logged-in user session.
+### 3.1 Daemon link — custom FastAPI WebSocket hub
 
-### Routing model
+- **Daemon sockets** — one per worker, authenticated with a daemon device-token
+  (issued by our own device-code flow, *not* Supabase Auth).
+- This is a **thin custom service** because daemon control needs guarantees Supabase
+  Realtime isn't built for: strict at-least-once delivery + idempotency for commands
+  and HITL resolutions, device-token auth, and backpressure control.
+- The hub stays **stateless** — routing/presence state lives in **Supabase Postgres**
+  (presence rows with TTL via a heartbeat) or a small Redis instance if pub/sub fan-out
+  between hub nodes is needed at scale. Any node can serve any daemon socket.
+- **Wire format**: MessagePack (compact, high-volume telemetry).
 
-- Every daemon and browser session subscribes to **Redis pub/sub** channels keyed by
-  tenant + resource (`org:{id}:daemon:{id}`, `org:{id}:agent:{id}`, `user:{id}`).
-- The hub is **stateless** — any node can serve any socket, because routing state
-  lives in Redis. This lets the realtime tier scale horizontally behind a load
-  balancer with sticky-by-nothing semantics.
-- **Presence** (which daemons/browsers are online) is tracked in Redis with TTL keys
-  refreshed by heartbeats.
+### 3.2 Browser link — Supabase Realtime
+
+- Browsers subscribe via **Supabase Realtime** (Broadcast channels + Presence), keyed
+  by tenant + resource (`org:{id}:agent:{id}`, `org:{id}:daemon:{id}`).
+- RLS policies gate which channels a user may subscribe to.
+- The custom hub (and async workers) **publish** telemetry/events into Supabase
+  Realtime channels; the browser receives them live via `supabase-js`. No bespoke
+  browser socket code required.
+- **Wire format**: JSON (debuggable, native to `supabase-js`).
 
 ### Message flow
 
 ```
 Browser clicks "Run agent"
-  → WS frame to hub  → validate auth/RBAC  → publish cmd to org:{id}:daemon:{id}
-  → daemon (subscribed) receives cmd  → executes
-  → daemon streams telemetry frames  → hub  → persists + republishes
-  → browser (subscribed to org:{id}:agent:{id}) renders live trace
+  → REST/Realtime to backend  → validate auth/RBAC  → write run row (Postgres)
+  → custom hub publishes cmd to the target daemon over its WS  → daemon executes
+  → daemon streams telemetry frames → hub → persists (Postgres/Storage)
+    + publishes to Supabase Realtime channel org:{id}:agent:{id}
+  → browser (subscribed via supabase-js) renders live trace
 ```
 
-- **Wire format**: MessagePack to daemons (compact), JSON to browsers (debuggable).
-- **Backpressure**: per-socket send queues with drop-oldest for non-critical telemetry
-  and guaranteed delivery for control/HITL frames.
-- **Delivery guarantees**: control + HITL frames are at-least-once with idempotency
-  keys; high-volume log frames are best-effort live but durably persisted (the
-  authoritative copy is in storage, the live stream is a convenience).
+- **Delivery guarantees**: daemon-bound control + HITL frames are at-least-once with
+  idempotency keys (custom hub); high-volume browser telemetry is best-effort live but
+  durably persisted — the authoritative copy is always in Postgres/Storage, the live
+  stream is a convenience.
 
 ---
 
@@ -110,7 +127,8 @@ Core entities:
 
 - **organizations** — tenant root; billing, settings.
 - **users** — accounts; belong to orgs via **memberships** (role: owner/admin/operator/viewer).
-- **daemons** — registered workers: name, tags, platform, version, last_seen, status.
+- **daemons** — registered workers: name, tags, platform, version, last_seen, status,
+  **e2e_public_key** (X25519 public key; the matching private key never leaves the daemon).
 - **agents** — agent definitions: name, type (api/cli), platform, owning daemon,
   current_version, limits, status.
 - **agent_versions** — immutable prompt/config snapshots (see Versioning §8).
@@ -124,23 +142,52 @@ Core entities:
 - **webhooks** — inbound trigger endpoints.
 - **notification_channels** — Slack/Discord/Email destinations + routing rules.
 - **hitl_requests** — pending/resolved approval gates.
-- **marketplace_listings / installs** — published agents & skills, and installations.
+- **env_var_refs** — env-var **metadata only**: name, scope (agent/shared), origin
+  (ui/local), target daemon, updated_by, updated_at. **No values, ever** (see §10.5).
+- **plugins** — catalog of installable capability packs: name, kind
+  (mcp/script/workspace/composite), versions, platform compatibility, declared
+  permissions, manifest ref, checksum/signature, ratings.
+- **plugin_installs** — which plugin version is attached to which agent on which daemon,
+  plus install status (`installing/ready/failed`) and exposed-tool capabilities.
+- **marketplace_listings / installs** — published agents, skills & plugins, and installs.
 
 High-volume, append-heavy data (raw **logs**, **metrics**, **reasoning traces**) lives
-in **ClickHouse** (or Timescale) for cheap time-series storage and fast aggregation;
-large blobs (full traces, artifacts) in **object storage (S3)** referenced by key.
+in **partitioned Postgres tables** (time-range partitions, BRIN indexes; TimescaleDB
+hypertables optional). Writes are **batched/downsampled** by the daemon and async
+workers — never one row per token — to keep insert volume (and Supabase usage cost)
+sane. Large blobs (full traces, artifacts) go in **Supabase Storage** (S3-backed),
+referenced by key from the run/tool_call rows.
+
+Multi-tenancy is enforced with **Postgres Row-Level Security (RLS)**: every table is
+scoped by `org_id`, and policies ensure a user/daemon only ever reads or writes its own
+org's rows — even through the auto-generated Supabase data APIs.
+
+> **Scale escape hatch:** if analytics aggregations over the telemetry tables ever
+> degrade past what partitioned Postgres + rollups can serve, introduce a columnar
+> store (ClickHouse) *only for telemetry* and keep records/audit in Postgres. Not in
+> the MVP.
 
 ---
 
 ## 5. API Surface
 
-- **REST/GraphQL (FastAPI)** for CRUD: agents, schedules, gateways, webhooks, channels,
-  marketplace, analytics queries, user/org management.
-- **WebSocket** for everything real-time (commands, telemetry, presence, HITL).
+- **REST (FastAPI)** for custom CRUD/business logic: agent deploy, marketplace install,
+  analytics queries, webhook processing. Simple table reads/writes can also use
+  Supabase's auto-generated data API (PostgREST) directly from the browser, gated by RLS.
+- **Custom daemon WebSocket** for the daemon control link (commands, telemetry, HITL).
+- **Supabase Realtime** for browser-facing live updates.
 - **Inbound webhook endpoints** (`/hooks/{token}`) that authenticate, validate, and
   translate external events into `agent.run` commands routed to the right daemon.
-- **OAuth 2.0** (device-code flow for daemons, authorization-code + PKCE for the
-  browser). JWT access tokens (short-lived) + rotating refresh tokens.
+
+### Auth (two identity planes)
+
+- **Browser / users → Supabase Auth (GoTrue)**: email/password, OAuth providers, magic
+  links; issues Supabase JWTs that carry `org_id`/role claims used by RLS policies and
+  by the FastAPI layer.
+- **Daemons → custom OAuth 2.0 device-code flow** (FastAPI): the daemon is not a human
+  user, so it gets its own long-lived refresh token + short-lived access token, scoped
+  to a single daemon. This token authenticates the daemon WebSocket and is what RLS
+  checks for daemon-originated writes.
 
 ---
 
@@ -153,7 +200,8 @@ large blobs (full traces, artifacts) in **object storage (S3)** referenced by ke
 1. Daemons stream metrics per run: cost, tokens (in/out), latency, tool-call count,
    error rate, duration.
 2. Async workers roll these into **time-bucketed aggregates** per agent/daemon/org
-   (per-minute → per-hour → per-day) in ClickHouse.
+   (per-minute → per-hour → per-day) stored in dedicated Postgres rollup tables
+   (or TimescaleDB continuous aggregates).
 3. The **anomaly engine** runs continuously over the rollups.
 
 ### Detectors
@@ -242,36 +290,73 @@ When a daemon emits `hitl.request`, the service:
   stores the gateway definitions and policy; the daemon enforces and executes the
   actual calls (so credentials and traffic stay local).
 
+### 10.5 Environment Variable Relay (zero-knowledge)
+
+The cloud brokers agent env vars **without ever being able to read their values**.
+
+- **Key registration**: each daemon registers an **X25519 public key** at pairing
+  (`daemons.e2e_public_key`); the private key never leaves the daemon's keychain.
+- **Set from Web UI**: the browser fetches the target daemon's public key, encrypts
+  each value client-side (libsodium sealed box), and sends only **ciphertext**. The
+  backend validates RBAC, writes an **`env_var_refs` metadata row (name/scope/origin —
+  no value)**, and relays the ciphertext to the daemon via an `env.set` command. The
+  ciphertext is **not persisted** — it is forwarded and dropped.
+- **Zero-knowledge**: TLS protects the wire, but because the cloud is the broker, the
+  E2E layer is what guarantees it cannot read the value — it holds no private key and
+  stores no ciphertext. The daemon decrypts and stores the value in its OS keyring.
+- **Set locally**: when an operator runs `synapse env set` on the daemon, the daemon
+  reports the **name only** up to the backend (an `env_var_refs` row with
+  `origin = local`) so the Web UI can list it read-only. The value never leaves the box.
+- **Delete**: an `env.delete` command removes the keyring entry and the metadata row.
+- **Audit**: every set/delete writes an `audit_event` (who, when, which var name, which
+  daemon) — never the value.
+
+> Net effect: the Web UI is the control surface, the daemon is the vault, and the cloud
+> is a blind courier. Compromising the cloud yields env-var *names*, never *values*.
+
 ---
 
-## 11. Marketplaces
+## 11. Marketplaces & Plugin Catalog
 
-- **Agent Marketplace** and **Skill Marketplace** — hosted catalogs of publishable,
-  installable agent templates and skills.
+- **Agent**, **Skill**, and **Plugin** marketplaces — hosted catalogs of publishable,
+  installable agent templates, skills, and **capability packs** (browser use, terminal
+  use, file explorer, coding-workspace, and MCP quick-installs).
 - Listings carry metadata: description, platform compatibility, required tools/MCP,
-  permissions requested, versioning, ratings.
-- **One-click install** resolves a listing into an agent definition + skill files and
-  pushes them to a chosen daemon via `agent.deploy` / `skill.install`.
-- Supports importing from **existing external marketplaces** (e.g. published skill
-  packs, MCP registries) via adapters.
-- Skills are **platform-scoped**: the same agent can install different skills per OS.
+  permissions requested, versioning, ratings, and (for plugins) the **manifest +
+  checksum/signature** the daemon verifies before provisioning.
+- **One-click install** resolves a listing and pushes it to a chosen daemon (and agent)
+  via `agent.deploy` / `skill.install` / `plugin.install`. The cloud tracks
+  `plugin_installs` status reported back by the daemon (`installing/ready/failed`).
+- Supports importing from **existing external marketplaces** (published skill packs,
+  **MCP registries**) via adapters — an external MCP server becomes an `mcp`-kind plugin.
+- Skills and plugins are **platform-scoped**: the same agent can carry different
+  skills/packs per OS, and the cloud only offers packs compatible with the target
+  daemon's platform.
+
+> Plugin *values/secrets* still follow the env-var rule (§10.5): the catalog holds
+> manifests and metadata, never an installed pack's runtime credentials.
 
 ---
 
 ## 12. Scaling, Reliability, Security
 
-- **Stateless API + realtime tier** → scale out horizontally; Redis carries routing,
-  presence, rate-limit, and pub/sub state.
+- **Stateless API + custom hub** → scale out horizontally; presence/routing state in
+  Postgres (or a small Redis if cross-node pub/sub fan-out is needed at scale).
 - **Async workers (Celery/Arq)** for analytics rollups, anomaly scans, notification
   fan-out, and webhook processing — decoupled from request latency.
-- **Storage tiering**: Postgres (records/audit), ClickHouse (telemetry), S3 (blobs),
-  Redis (ephemeral).
-- **Multi-tenancy isolation**: row-level tenant scoping on every query; per-org rate
-  limits and quotas.
+- **Storage tiering (all Supabase)**: Postgres (records/audit + partitioned telemetry +
+  rollups), Supabase Storage (blobs). Optional ClickHouse only if telemetry analytics
+  outgrows Postgres.
+- **Multi-tenancy isolation**: **Postgres RLS** scopes every row by `org_id` — enforced
+  even through the auto-generated Supabase data API; plus per-org rate limits and quotas.
 - **Zero raw secrets**: the cloud stores agent *config* and *policy*, never provider
-  API keys; telemetry arrives pre-redacted from the daemon.
-- **Transport**: TLS everywhere; daemon and browser sockets independently
-  authenticated; RBAC enforced on every command and HITL resolution.
+  API keys; telemetry arrives pre-redacted from the daemon. **Env-var values are
+  E2E-encrypted to the daemon** — the cloud relays opaque ciphertext and stores only
+  variable *names* (§10.5).
+- **Transport**: TLS everywhere; daemon (device-token) and browser (Supabase JWT)
+  independently authenticated; RBAC enforced on every command and HITL resolution.
+- **Cost control**: batch/downsample telemetry writes; Supabase self-hosts if vendor
+  lock-in or per-row write cost becomes a concern at scale.
 
 ---
 
@@ -280,14 +365,16 @@ When a daemon emits `hitl.request`, the service:
 | Concern | Choice |
 |---------|--------|
 | API framework | FastAPI (Python) |
-| Realtime | WebSockets + Redis pub/sub |
-| Records DB | PostgreSQL |
-| Telemetry DB | ClickHouse (or TimescaleDB) |
-| Blob storage | S3-compatible object store |
-| Cache / pub-sub / presence | Redis |
+| Records + audit DB | **Supabase Postgres** (with RLS) |
+| Telemetry DB | **Supabase Postgres**, partitioned (TimescaleDB optional); ClickHouse only at scale |
+| Blob storage | **Supabase Storage** (S3-backed) |
+| Browser realtime | **Supabase Realtime** (Broadcast + Presence) |
+| Daemon realtime | Custom FastAPI WebSocket hub (MessagePack) |
+| User/browser auth | **Supabase Auth** (GoTrue) |
+| Daemon auth | Custom OAuth 2.0 device-code flow, JWT |
 | Async jobs | Celery / Arq |
-| Auth | OAuth 2.0 (device-code + auth-code/PKCE), JWT |
-| Notifications | Slack/Discord SDKs, SES/Postmark |
+| Optional cache/pub-sub | Redis (only if needed for hub fan-out) |
+| Notifications | Slack/Discord SDKs, SES/Postmark (or Supabase Edge Functions) |
 | Wire format | MessagePack (daemon) / JSON (browser) |
 
 See **[integration.md](integration.md)** for the end-to-end message flows that tie the

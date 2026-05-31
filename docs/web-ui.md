@@ -25,18 +25,19 @@ coherent app: "click a button, pick a daemon, an agent is live."
 | Concern | Choice |
 |---------|--------|
 | Framework | React + TypeScript (Next.js or Vite SPA) |
-| Realtime | Native WebSocket client w/ auto-reconnect + resubscribe |
-| Server state | TanStack Query (REST/GraphQL) |
+| Realtime | **Supabase Realtime** (`supabase-js`: Broadcast + Presence) |
+| Server state | TanStack Query (REST + Supabase data API) |
 | Client state | Zustand / Redux Toolkit |
 | Styling | Tailwind CSS + a component library (Radix/shadcn) |
 | Charts | Recharts / visx for analytics |
 | Markdown editor | CodeMirror 6 / Monaco with live preview |
 | Diff view | Monaco diff editor (prompt versioning) |
-| Auth | OAuth 2.0 auth-code + PKCE; JWT in memory + refresh |
+| Auth | **Supabase Auth** (`supabase-js`) — JWT carries `org_id`/role for RLS |
 
-- **Hybrid data model**: slow-changing config via REST/GraphQL (cached by TanStack
-  Query); fast-changing telemetry via the WebSocket, merged into the cache so the UI
-  is always live without manual refresh.
+- **Hybrid data model**: slow-changing config via REST + the Supabase data API
+  (cached by TanStack Query, gated by RLS); fast-changing telemetry via **Supabase
+  Realtime** channels, merged into the cache so the UI is always live without manual
+  refresh. No bespoke WebSocket client to maintain.
 
 ---
 
@@ -53,13 +54,15 @@ Synapse
 │       ├── Versions   (history, diff, one-click rollback)
 │       ├── Schedule   (cron/interval/one-shot)
 │       ├── Tools/MCP  (gateways, MCP servers, blockers)
+│       ├── Plugins    (install capability packs onto this agent's daemon)
+│       ├── Environment(env vars — E2E encrypted to the daemon, write-only)
 │       ├── Runs       (history + live trace viewer)
 │       ├── Logs       (access logs, tool logs — redaction-aware)
 │       └── Analytics  (tokens, spend, latency, tasks, tool calls)
 ├── Runs               (global run history across all agents)
 ├── Approvals          (HITL queue)
 ├── Alerts             (anomalies, failures, offline daemons)
-├── Marketplace        (agents + skills, one-click install)
+├── Marketplace        (agents + skills + plugins, one-click install)
 ├── Notifications      (Slack/Discord/Email channels + routing)
 ├── Webhooks           (inbound triggers)
 └── Settings           (org, members/RBAC, billing, API tokens)
@@ -128,14 +131,71 @@ Everything that defines an agent's behavior is editable **online**:
 - Missed-run policy selector (skip / run-once / coalesce).
 - Timezone-aware; shows the next N fire times.
 
-### 4.7 Tools, MCP & Blockers
+### 4.7 Tools, MCP, Plugins & Blockers
+
+**Tools / MCP / blockers**
 
 - Configure **MCP servers** and **gateways** the agent may use.
 - Define **rulesets/blockers**: denied commands, path guards, network allow-lists,
   cost/tool-call caps, and which actions require **HITL approval**.
 - Each rule's severity (block / require-approval / warn) is set here.
 
-### 4.8 Runs & Live Trace Viewer
+**Plugins (capability packs)** — the *Plugins* tab
+
+Plugins give an agent new **actions** (vs. skills, which give it knowledge). Install
+them from the web and they load onto the agent running on the selected daemon.
+
+- **Defaults shown**: every agent lists its built-in capabilities (default MCP servers:
+  filesystem, fetch, git) as always-available.
+- **Browse & install**: from the agent's *Plugins* tab or the **Marketplace**, pick a
+  pack and **one-click install** onto this agent's host daemon. Packs include
+  **browser use** (Playwright automation), **terminal use** (sandboxed shell), **file
+  explorer** (scoped FS tools), **MCP quick-installs** (GitHub, Slack, Postgres…), and
+  **custom coding environments** (per-project virtualenvs/workspaces for `claude`/
+  `aider` agents).
+- **Live install status**: a pack shows `installing → ready | failed` as the daemon
+  provisions it (creates the venv/workspace, installs deps, registers MCP servers/
+  tools). Failures surface the install log.
+- **Per-platform**: the UI only offers packs compatible with the target daemon's OS;
+  the same agent can carry different packs on different daemons.
+- **Manage**: view each pack's exposed tools and declared **permissions** (network/
+  filesystem/HITL), pin versions, update, or remove (which tears down its sandbox).
+- **Custom packs**: install an unpublished/local plugin by reference for private tools.
+
+See [tui-daemon.md](tui-daemon.md) §4.11 for how packs are provisioned and sandboxed,
+and [cloud-backend.md](cloud-backend.md) for the catalog/relay.
+
+### 4.8 Environment Variables
+
+Set the env vars an agent's runs execute with (e.g. `OPENAI_API_KEY`, `DATABASE_URL`,
+`STRIPE_SECRET`). Designed so **secret values never touch cloud storage and the cloud
+cannot even read them in transit**.
+
+- **Editor UI**: a `KEY` / `VALUE` table per agent. Each row marks the var as
+  **secret** (masked, write-only) or **plain** (e.g. `LOG_LEVEL`, readable for
+  convenience). Bulk paste/import from a `.env` file.
+- **End-to-end encrypted**: on save, the browser fetches the **target daemon's public
+  key** and encrypts each value client-side (libsodium sealed box). Only the resulting
+  **ciphertext** is sent — the cloud relays it as an opaque blob to the daemon, which
+  decrypts it and stores it in the **OS keyring**. TLS protects the wire; the E2E layer
+  ensures the cloud (the broker) never sees plaintext. See
+  [tui-daemon.md](tui-daemon.md) and [cloud-backend.md](cloud-backend.md).
+- **Write-only**: once saved, a secret value **cannot be read back** in the UI — there
+  is nowhere to read it from (not stored on the cloud, encrypted at rest on the daemon).
+  You can **overwrite** or **delete** it, not view it. The UI only ever shows the list
+  of **variable names** + metadata (last updated, who, which daemon), which is all the
+  cloud retains.
+- **Locally-set vars are visible too**: vars set directly on the daemon
+  (`synapse env set ...`) appear here as **read-only, "set locally"** entries (name
+  only), so the operator sees the full effective environment without the UI being able
+  to expose or manage their values. Precedence and origin are labeled.
+- **Scope**: per-agent by default; an org/daemon-level **shared set** can be defined and
+  inherited (with per-agent override).
+- **Auto-redaction tie-in**: every value pushed this way is registered with the
+  daemon's redaction middleware, so even if an agent echoes a secret it is masked in
+  logs.
+
+### 4.9 Runs & Live Trace Viewer
 
 - **Run history** per agent and globally: trigger source (schedule/webhook/manual),
   status, duration, cost, tokens, exit code.
@@ -144,7 +204,7 @@ Everything that defines an agent's behavior is editable **online**:
   cost, updating over the WebSocket.
 - Replay completed runs with the same trace UI.
 
-### 4.9 Logs (redaction-aware)
+### 4.10 Logs (redaction-aware)
 
 - **Full access logs and tool logs** for every agent, searchable and filterable.
 - Redacted values are rendered as visible markers (`<REDACTED:API_KEY>`) — the UI
@@ -152,7 +212,7 @@ Everything that defines an agent's behavior is editable **online**:
 - A per-run **redaction summary** ("12 secrets masked") gives confidence without
   exposure.
 
-### 4.10 Analytics
+### 4.11 Analytics
 
 Deep, per-agent and fleet-wide:
 
@@ -163,7 +223,7 @@ Deep, per-agent and fleet-wide:
 - Charts powered by the cloud's analytics rollups; drill from a chart into the
   underlying runs.
 
-### 4.11 Approvals (HITL)
+### 4.12 Approvals (HITL)
 
 - A live **approval queue** of paused runs awaiting human decision.
 - Each card shows the **proposed sensitive action**, full context/diff, and the
@@ -172,29 +232,31 @@ Deep, per-agent and fleet-wide:
   the audit log, and routed back to the daemon to resume (or abort) the run.
 - Mirrors what arrives in Slack/Discord/Email so any channel can resolve a gate.
 
-### 4.12 Alerts / Observability
+### 4.13 Alerts / Observability
 
 - A feed of **anomaly alerts** from the cloud's detection engine: cost-per-task spikes,
   3× latency regressions, error surges, token blow-ups, silent agents, offline daemons.
 - Each alert shows the metric, the baseline, the observed value, and a link to the
   offending runs.
 
-### 4.13 Marketplaces
+### 4.14 Marketplaces
 
-- Browse the **Agent Marketplace** and **Skill Marketplace** (plus imported external
-  catalogs).
+- Browse the **Agent Marketplace**, **Skill Marketplace**, and **Plugin Marketplace**
+  (capability packs / MCP quick-installs), plus imported external catalogs and MCP
+  registries.
 - Listings show description, platform compatibility, required tools/MCP, requested
   permissions, version, and ratings.
-- **One-click install**: pick a target daemon, and the agent/skill is provisioned.
+- **One-click install**: pick a target daemon (and agent), and the agent/skill/plugin
+  is provisioned onto it.
 
-### 4.14 Notifications & Webhooks
+### 4.15 Notifications & Webhooks
 
 - **Notifications**: connect Slack/Discord/Email channels; define routing rules
   (which events from which agents go where).
 - **Webhooks**: create signed inbound trigger URLs that start agents on external
   events; view delivery history.
 
-### 4.15 Settings & RBAC
+### 4.16 Settings & RBAC
 
 - Org profile, **members & roles** (owner/admin/operator/viewer), billing/usage,
   and API tokens. Roles gate who can deploy, edit, approve HITL, and view secrets-
@@ -204,11 +266,13 @@ Deep, per-agent and fleet-wide:
 
 ## 5. Real-Time Behavior
 
-- On login, the browser opens a WebSocket to the cloud and **subscribes** to the
-  resources currently in view (an agent detail page subscribes to that agent's run/
-  telemetry channel; the dashboard subscribes to fleet-level events).
-- Incoming frames patch the TanStack Query cache → UI updates with no refresh.
-- Auto-reconnect with **resubscribe-on-reconnect** so live views recover seamlessly.
+- On login (Supabase Auth), the browser **subscribes to Supabase Realtime channels**
+  for the resources in view (an agent detail page subscribes to that agent's run/
+  telemetry channel; the dashboard subscribes to fleet-level events). RLS decides what
+  it's allowed to receive.
+- Incoming events patch the TanStack Query cache → UI updates with no refresh.
+- `supabase-js` handles reconnect; the app **resubscribes on reconnect** so live views
+  recover seamlessly.
 - Optimistic UI for commands (e.g. "Run now" shows pending immediately), reconciled
   when the daemon's acknowledgement/telemetry arrives.
 

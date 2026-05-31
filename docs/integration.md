@@ -35,21 +35,25 @@ Three invariants define every interaction:
 
 ## 2. Connection Establishment
 
-### Daemon ↔ Cloud
-1. User installs `synapse-worker`, runs `synapse login` → **OAuth device-code flow**.
+### Daemon ↔ Cloud (custom WebSocket hub)
+1. User installs `synapse-worker`, runs `synapse login` → **custom OAuth device-code
+   flow** (daemons are not Supabase Auth users — they get their own daemon token).
 2. Daemon receives a refresh token (stored in OS keychain) + access token.
-3. Daemon opens an outbound **WSS** to the cloud, authenticates with the access token,
-   and registers (name, tags, platform, version).
-4. Cloud marks the daemon **online**, records presence in Redis, subscribes it to its
-   `org:{id}:daemon:{id}` channel.
+3. Daemon opens an outbound **WSS** to the **custom FastAPI hub**, authenticates with
+   the access token, and registers (name, tags, platform, version).
+4. Cloud marks the daemon **online**, writes a presence row (Postgres, TTL refreshed by
+   heartbeat), and routes its `org:{id}:daemon:{id}` channel.
 5. Daemon heartbeats every 15s → cloud derives uptime + offline alerts.
 
-### Browser ↔ Cloud
-1. User logs in via **OAuth auth-code + PKCE**.
-2. Browser opens a **WSS** to the cloud and subscribes to the resources in view
-   (fleet-level on the dashboard, agent-level on a detail page).
+### Browser ↔ Cloud (Supabase)
+1. User logs in via **Supabase Auth** (GoTrue: OAuth providers / email). The JWT
+   carries `org_id`/role claims used by RLS.
+2. Browser subscribes to live resources via **Supabase Realtime** (Broadcast +
+   Presence), gated by RLS; slow-changing config is read via REST / the Supabase data
+   API. Live updates require no bespoke browser socket code.
 
-The cloud is the only endpoint either side knows about.
+The browser and daemon still never talk directly — the cloud (custom hub + Supabase)
+is the only endpoint either side knows about.
 
 ---
 
@@ -68,15 +72,19 @@ RBAC-checks, persists, and publishes to the target daemon's channel:
 | Run now | create `runs` row (pending) | `agent.run` |
 | Cancel run | update `runs` | `agent.cancel` |
 | Install from marketplace | resolve listing | `agent.deploy` / `skill.install` |
+| Install plugin (capability pack) | track `plugin_installs` | `plugin.install` |
+| Remove plugin | update `plugin_installs` | `plugin.remove` |
 | Configure MCP / blockers | persist policy | `mcp.configure` |
+| Set env var (E2E encrypted) | store name only, relay ciphertext | `env.set` |
+| Delete env var | drop metadata row | `env.delete` |
 | Approve/deny HITL | write audit + decision | `hitl.resolve` |
 | Rollback to version | set `current_version` | `agent.update_prompt` |
 
 ### Upstream: telemetry (Daemon → Cloud → Browser)
 
-While an agent runs, the daemon streams a reasoning trace. The cloud persists it
-(Postgres records, ClickHouse metrics/logs, S3 blobs) **and** republishes it live to
-any subscribed browser:
+While an agent runs, the daemon streams a reasoning trace to the custom hub. The cloud
+persists it (Supabase Postgres for records + partitioned telemetry, Supabase Storage for
+blobs) **and** publishes it to a Supabase Realtime channel for any subscribed browser:
 
 | Daemon emits | Cloud does | Browser sees |
 |--------------|-----------|--------------|
@@ -96,21 +104,22 @@ any subscribed browser:
 
 ```
 Browser: New Agent → pick daemon "macbook-01", type=CLI (claude code)
-   │  WS: agent.create
+   │  REST: agent.create (Supabase JWT)
    ▼
-Cloud:  validate RBAC → write agents + agent_versions(v1) → publish agent.deploy
-   │  WS → org:acme:daemon:macbook-01
+Cloud:  RBAC/RLS check → write agents + agent_versions(v1) [Postgres]
+   │  custom hub publishes agent.deploy over WS → org:acme:daemon:macbook-01
    ▼
 Daemon: write agent def to ~/.synapse/agents/ → ack
    │
-Browser: "Run now"  ──WS: agent.run──►  Cloud (create runs row) ──►  Daemon
+Browser: "Run now"  ──REST: agent.run──►  Cloud (write runs row) ──hub WS──►  Daemon
    ▼
 Daemon: render prompt → spawn `claude` subprocess → stream stdout
-   │  every chunk → Redaction Middleware → upload queue → WS to cloud
+   │  every chunk → Redaction Middleware → upload queue → WS to custom hub
    ▼
-Cloud:  persist trace/metrics → republish to org:acme:agent:{id}
+Cloud:  persist trace/metrics [Postgres/Storage] → publish to
+        Supabase Realtime channel org:acme:agent:{id}
    ▼
-Browser: live trace viewer updates token-by-token, running cost ticks up
+Browser: live trace viewer (supabase-js) updates token-by-token, cost ticks up
    ▼
 Daemon: run completes → emits run.finished(status, cost, tokens)
    ▼
@@ -151,7 +160,7 @@ Daemon: executes → telemetry flows back exactly as in 4.1
 ```
 Daemon: streams per-run cost/latency continuously
    ▼
-Cloud:  async workers roll metrics into ClickHouse buckets
+Cloud:  async workers roll metrics into Postgres rollup tables (time buckets)
         anomaly engine: cost/task EWMA z-score breach OR p95 latency ≥ 3× baseline
    ▼
 Cloud:  emit anomaly_event(severity, metric, baseline, observed)
@@ -171,6 +180,50 @@ Browser: click Rollback → Cloud sets current_version=v7 → agent.update_promp
 Daemon: applies v7 → next runs green again. (v8 stays immutably in history.)
 ```
 
+### 4.6 Set an environment variable (zero-knowledge, never on the cloud)
+
+```
+Browser: Agent → Environment → add OPENAI_API_KEY = sk-...
+   ▼  fetch target daemon's X25519 public key
+Browser: encrypt value client-side (libsodium sealed box) → ciphertext
+   ▼  REST: env.set { name, ciphertext }   (Supabase JWT, RBAC checked)
+Cloud:  write env_var_refs(name, scope, origin=ui)  ← NAME ONLY, no value
+        relay ciphertext to daemon via hub  ← ciphertext NOT persisted
+   ▼  hub WS → org:acme:daemon:macbook-01
+Daemon: decrypt with private key (in OS keychain) → store value in OS keyring
+        register value with Redaction Middleware → ack (name only)
+   ▼
+Browser: Environment list shows OPENAI_API_KEY (write-only, can't read back)
+
+   ── alternative: set locally ──
+Operator: `synapse env set OPENAI_API_KEY=sk-... --agent triage-bot`
+   ▼  value → OS keyring directly (never transmitted)
+Daemon: report NAME ONLY upstream → Cloud env_var_refs(origin=local)
+   ▼
+Browser: shows it as read-only "set locally"
+
+At run time: daemon injects keyring vars into the agent's process env.
+The cloud never held the value; compromising the cloud yields names, not secrets.
+```
+
+### 4.7 Install a plugin (capability pack) from the web
+
+```
+Browser: Marketplace/Plugins → "browser-use" → Install → pick daemon "macbook-01", agent "web-bot"
+   ▼  REST: plugin.install { plugin: browser-use@1.4.0, agent: web-bot }
+Cloud:  RBAC check → verify platform compat → write plugin_installs(status=installing)
+        send manifest + checksum → publish plugin.install over hub
+   ▼  hub WS → org:acme:daemon:macbook-01
+Daemon: verify checksum → create isolated venv → install deps → playwright install
+        register `browser` MCP server + tools → apply declared permissions (Ruleset)
+        attach to agent web-bot → stream status: installing → ready (+ tool list)
+   ▼  status/capabilities flow up via hub → Supabase Realtime
+Browser: plugin shows "ready"; web-bot now has browser tools on its next run
+   ▼
+(next run) Daemon: agent can navigate/click/screenshot via the browser MCP server,
+                   all actions governed by blockers + redaction.
+```
+
 ---
 
 ## 5. Where Each Responsibility Lives
@@ -179,11 +232,13 @@ Daemon: applies v7 → next runs green again. (v8 stays immutably in history.)
 |---------|:------:|:-------------:|:----------:|
 | User-facing control | ● | | |
 | Auth / identity / RBAC | requests | **enforces** | presents token |
-| Real-time routing | subscribes | **brokers (Redis pub/sub)** | streams |
+| Real-time routing | subscribes (Supabase Realtime) | **brokers (custom hub + Supabase Realtime)** | streams (custom WS) |
 | Agent execution | | | **runs** |
 | Provider API keys / secrets | never | never | **keychain only** |
+| Agent env-var values | encrypts (write-only) | relays ciphertext, name only | **decrypts → keyring → injects** |
 | PII / secret redaction | shows markers | stores redacted | **redacts on-device** |
 | Rulesets / blockers | authored | stored | **enforced** |
+| Plugins / capabilities | browse + install | catalog + relay + status | **provisions (venv/MCP), sandboxes, runs** |
 | HITL gate | resolves | routes + fans out | **pauses/resumes** |
 | Scheduling | authored | stored | **fires (APScheduler)** |
 | Run history / logs / audit | views | **system of record** | buffers + ships |
@@ -204,10 +259,10 @@ Daemon: applies v7 → next runs green again. (v8 stays immutably in history.)
   telemetry queues offline and replays in order on reconnect (at-least-once + idempotency
   keys). The cloud is the long-term system of record.
 - **Resilience:** outbound-only daemon sockets with exponential-backoff reconnect;
-  stateless cloud realtime tier (state in Redis) so any node serves any socket;
-  browser auto-resubscribes on reconnect.
-- **Wire efficiency:** MessagePack on daemon↔cloud links (volume), JSON on
-  cloud↔browser (debuggability).
+  stateless custom hub (presence/routing state in Postgres) so any node serves any
+  daemon socket; browsers auto-resubscribe to Supabase Realtime on reconnect.
+- **Wire efficiency:** MessagePack on the daemon↔hub link (volume), JSON on the
+  Supabase↔browser link (debuggability, native to `supabase-js`).
 - **Auditability everywhere:** every command (who clicked what) and every agent
   decision (what it did and why) lands in the immutable, optionally hash-chained audit
   log — a complete chain from human intent → cloud routing → on-machine action.
