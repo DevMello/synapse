@@ -140,6 +140,26 @@ Everything that defines an agent's behavior is editable **online**:
   cost/tool-call caps, and which actions require **HITL approval**.
 - Each rule's severity (block / require-approval / warn) is set here.
 
+**Input/Output Filtering (guardrails)** — the *Filtering* panel
+
+Configure the daemon-side middleware that screens content entering and leaving the model
+(see [tui-daemon.md](tui-daemon.md) §4.5). Two layers, both edited here:
+
+- **PII / secret redaction** — toggle built-in detectors (API keys, emails, tokens,
+  card/SSN patterns), add **custom redaction rules** (regex/keyword), and pick the mode
+  per rule: **block / mask / hash**. A read-only note explains tokens are salted on-device.
+- **Prompt-injection & jailbreak guard** — enable inbound screening (untrusted tool/web
+  content checked for instruction-override, data-exfiltration, and tool-bypass attempts)
+  and outbound screening (model output checked for self-instruction override, policy
+  divergence, secret-leak). Each finding category maps to a **ruleset action**
+  (block / require-approval / warn). Optionally enable the **local classifier** (Ollama)
+  for daemons that have it; the UI flags daemons where it's unavailable.
+- Set **per-agent overrides** on top of an **org-wide default policy**; the panel shows
+  which settings are inherited vs. overridden.
+
+Findings never include raw sensitive content — only category, severity, action, and a
+redacted excerpt — and surface live in **Logs** (§4.10) and **Alerts** (§4.13).
+
 **Plugins (capability packs)** — the *Plugins* tab
 
 Plugins give an agent new **actions** (vs. skills, which give it knowledge). Install
@@ -203,6 +223,11 @@ cannot even read them in transit**.
   time: each prompt, completion, tool call, tool result, token tally, and running
   cost, updating over the WebSocket.
 - Replay completed runs with the same trace UI.
+- **Recovery status**: runs surface `interrupted` / `recovering` / `resumed` states
+  with a checkpoint progress marker (e.g. "step 14/30, resumed on macbook-02"). A
+  manual **Resume / Restart / Abort** override is available (gated by the agent's resume
+  policy) for the rare case auto-recovery needs a human decision. See
+  [tui-daemon.md](tui-daemon.md) §4.12.
 
 ### 4.10 Logs (redaction-aware)
 
@@ -211,6 +236,11 @@ cannot even read them in transit**.
   *never receives raw secrets*, because the daemon masked them before upload.
 - A per-run **redaction summary** ("12 secrets masked") gives confidence without
   exposure.
+- **Guardrail findings inline**: prompt-injection / jailbreak detections appear in the
+  trace where they fired — tagged with category (override / exfiltration / tool-bypass /
+  policy-divergence / secret-leak), severity, and the action the daemon took (blocked /
+  sent to approval / warned) — alongside a redacted excerpt. Filter the log to
+  *guardrail events only* to review everything caught for a run.
 
 ### 4.11 Analytics
 
@@ -235,7 +265,10 @@ Deep, per-agent and fleet-wide:
 ### 4.13 Alerts / Observability
 
 - A feed of **anomaly alerts** from the cloud's detection engine: cost-per-task spikes,
-  3× latency regressions, error surges, token blow-ups, silent agents, offline daemons.
+  3× latency regressions, error surges, token blow-ups, silent agents, offline daemons,
+  **interrupted runs awaiting recovery**, and **prompt-injection spikes** (an agent
+  suddenly tripping override/exfiltration patterns — often a poisoned data source or
+  compromised upstream; repeated blocks can auto-pause the agent pending review).
 - Each alert shows the metric, the baseline, the observed value, and a link to the
   offending runs.
 

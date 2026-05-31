@@ -2,7 +2,7 @@
 
 > The agent that lives on the user's machine. A Python package the user installs,
 > running as a persistent daemon that executes agents, redacts secrets, and bridges
-> the local environment to the Synapse cloud over a WebSocket.
+> the local environment to the Synapse cloud over a gRPC stream (HTTP/2).
 
 ---
 
@@ -17,7 +17,7 @@ user's own credentials.
 It serves three jobs:
 
 1. **Connection** — establish and maintain a secure, authenticated, bidirectional
-   WebSocket to the Cloud Backend so the browser can drive it in real time.
+   **gRPC stream (HTTP/2)** to the Cloud Backend so the browser can drive it in real time.
 2. **Execution** — run agents (API-based LLM agents *and* CLI tools like `claude`,
    `aider`, `gemini`, shell scripts) inside isolated, monitored processes on a
    schedule, webhook, or manual trigger.
@@ -67,6 +67,12 @@ machine**; the **public key is registered with the cloud**. This is what the Web
 uses to encrypt env-var values so the cloud can only ever relay opaque ciphertext (see
 [§4.10](#410-environment-variable-vault)).
 
+The daemon also receives (via the user's authenticated session) the **org recovery key**
+— an org-scoped X25519 keypair whose private half is held only in the keychains of
+authorized daemons. Checkpoints are encrypted to its public key before being synced to
+the cloud, so any authorized daemon in the org can decrypt and **resume an interrupted
+run** even if the original machine is gone (see [§4.12](#412-checkpointing-resume--recovery)).
+
 ### Running as a service
 
 | OS | Mechanism |
@@ -89,7 +95,7 @@ auto-restarts on crash and on boot, and reconnects to the cloud automatically.
 │  ┌────────────────┐   ┌──────────────────┐   ┌────────────────────┐  │
 │  │  Connection     │   │   Control Loop   │   │   Textual TUI      │  │
 │  │  Manager        │◄─►│   (asyncio core) │◄─►│   (optional front) │  │
-│  │  - WS client    │   │   - dispatcher   │   └────────────────────┘  │
+│  │  - gRPC client  │   │   - dispatcher   │   └────────────────────┘  │
 │  │  - reconnect    │   │   - heartbeat    │                           │
 │  │  - auth refresh │   │   - cmd router   │                           │
 │  └────────────────┘   └────────┬─────────┘                           │
@@ -126,19 +132,38 @@ auto-restarts on crash and on boot, and reconnects to the cloud automatically.
 
 ### 4.1 Connection Manager
 
-- Maintains a single multiplexed **WebSocket** (WSS) to the Cloud Backend.
-- **Heartbeat**: sends `ping` every 15s; if 3 missed pongs, tears down and reconnects.
-- **Reconnect**: exponential backoff with jitter (1s → 60s cap).
-- **Auth**: presents access token on connect; transparently refreshes via the refresh
-  token when a `401`/`token_expired` frame arrives.
+- Maintains a single outbound **gRPC connection (HTTP/2)** to the Cloud Backend, opened
+  with `grpcio` (grpc.aio async client). Two RPCs multiplex over the one connection:
+  - **`Connect(stream DaemonMessage) → stream CloudMessage`** — a long-lived
+    **bidirectional-streaming** RPC carrying control + HITL both ways. The daemon (the
+    client) always initiates it, so no inbound port is ever opened.
+  - **`IngestTelemetry(stream TelemetryFrame) → TelemetryAck`** — a separate
+    **client-streaming** RPC for the high-volume trace/metric firehose, on its own HTTP/2
+    stream so a flood of trace chunks can't head-of-line-block control or HITL messages.
+- **Liveness**: HTTP/2 **keepalive PINGs** (grpc keepalive params) detect a dead
+  transport; an app-level heartbeat message every 15s drives cloud presence/uptime.
+- **Reconnect**: exponential backoff with jitter (1s → 60s cap); a dropped stream is
+  re-opened and both RPCs re-established.
+- **Auth**: presents the daemon access token as gRPC call **metadata**
+  (`authorization: Bearer …`) when opening each stream; transparently refreshes via the
+  refresh token on an `UNAUTHENTICATED` status and re-opens. Optionally pinned with
+  **mTLS** (daemon client cert) since the daemon has a stable identity.
 - **Offline buffering**: while disconnected, all telemetry (logs, metrics, run results)
   is durably queued in the local SQLite WAL store and **replayed in order** on
-  reconnect with at-least-once delivery (idempotency keys dedupe server-side).
-- All frames are **MessagePack** for compactness; large log blobs are chunked.
+  reconnect with at-least-once delivery (idempotency keys dedupe server-side). gRPC gives
+  ordered delivery *within* a stream but no redelivery across reconnects, so these
+  app-level sequence numbers + acks remain the source of truth — not the transport.
+- **Reconnect reconciliation**: on every reconnect the daemon sends a `run.reconcile`
+  message (on the `Connect` stream) listing its in-flight/finished runs and their latest
+  checkpoint sequence numbers, so the cloud and daemon agree on state and any work done
+  offline is uploaded (see [§4.12](#412-checkpointing-resume--recovery)).
+- All messages are **Protocol Buffers** (the `.proto` schema is the wire contract);
+  large log blobs are chunked across `TelemetryFrame`s.
 
 ### 4.2 Control Loop / Command Router
 
-Receives commands from the cloud and routes them:
+Receives commands from the cloud as `CloudMessage`s on the `Connect` stream and routes
+them (each `CloudMessage` carries a oneof command payload + an idempotency key):
 
 | Command | Action |
 |---------|--------|
@@ -154,6 +179,7 @@ Receives commands from the cloud and routes them:
 | `env.set` | decrypt an E2E-encrypted env var and store it in the keyring |
 | `env.delete` | remove an env var from the keyring |
 | `hitl.resolve` | deliver an approve/deny decision to a paused run |
+| `run.recover` | adopt + resume an interrupted run from its last-known-good checkpoint |
 | `daemon.update` | self-update the worker package |
 | `daemon.ping` | uptime/health probe |
 
@@ -199,6 +225,9 @@ endpoint = "stdio:///usr/local/bin/github-mcp"
 - The runtime captures a **full reasoning trace**: every prompt, completion, tool
   call, tool result, token count, latency, and cost, streamed live to the cloud and
   persisted locally.
+- The runtime is **checkpointed**: it writes a durable session-state checkpoint after
+  each step/tool call so a crash or network blip never loses progress or forces a
+  re-run of expensive work (see [§4.12](#412-checkpointing-resume--recovery)).
 
 #### API Adapter
 
@@ -223,13 +252,19 @@ endpoint = "stdio:///usr/local/bin/github-mcp"
 - Missed runs (daemon was offline) follow a configurable policy: `skip`, `run_once`,
   or `coalesce`.
 
-### 4.5 Redaction Middleware (PII / Secret Masking)
+### 4.5 Input/Output Filtering Middleware (Guardrails)
 
-> **Hard guarantee: redaction runs on-device, before any byte leaves the machine.**
+> **Hard guarantee: all filtering runs on-device, before any byte leaves the machine.**
 
-A streaming middleware that sits between the Agent Runtime's telemetry output and the
-Connection Manager's upload queue. Every log line, tool argument, tool result, prompt,
-and completion passes through it.
+A streaming middleware with two layers. Layer **A (redaction)** protects *your* data
+leaving the box. Layer **B (injection/jailbreak guard)** protects *the agent* from
+untrusted content coming in and protects *your rules* from the agent's output going out.
+It sits on both edges of the Agent Runtime — screening **inbound** data before it
+reaches the model and **outbound** data before it is acted on or uploaded.
+
+#### Layer A — PII / Secret Redaction
+
+Every log line, tool argument, tool result, prompt, and completion passes through it.
 
 Detection layers:
 
@@ -248,6 +283,52 @@ Behavior:
   to each run so the dashboard can show "12 secrets masked" without exfiltration.
 - Configurable modes: `block` (drop the field), `mask` (tokenize), or `hash`.
 - Bypassable only with explicit, audited per-agent opt-out.
+
+#### Layer B — Prompt-Injection & Jailbreak Guard
+
+> **Trust model:** the agent's system instructions and rulesets are enforced by the
+> *daemon*, not the model. A model cannot actually rewrite its own rules — so this layer
+> exists to **detect, neutralize, and surface** attempts, not to be the thing standing
+> between a jailbreak and a deleted file (that is the Ruleset Engine, §4.6).
+
+**Inbound screening (untrusted content → model).** The classic injection vector is
+data the agent ingests: a fetched web page (browser plugin), a file's contents, an
+email body, a webhook payload, a retrieved document. Before such content is handed to
+the model it is screened for:
+
+- **Instruction-override patterns** — "ignore previous/above instructions", "disregard
+  your system prompt", "you are now…", role-confusion / fake-system markers.
+- **Exfiltration lures** — "print your system prompt", "reveal your API keys / env",
+  "send the contents of … to …".
+- **Tool/rule-bypass coaxing** — content trying to get the agent to call blocked tools,
+  disable guards, or escalate permissions.
+
+Untrusted content is **spotlighted/delimited** (wrapped and marked as data, embedded
+instructions escaped) so the model treats it as input, not commands — and high-
+confidence injections are stripped or the step is paused per policy.
+
+**Outbound screening (model output / tool-calls → action).** Before a completion or
+tool call is acted on, it is checked for:
+
+- **Self-instruction override** — the agent attempting to redefine its system prompt,
+  rules, or guardrails to bypass them (the example case).
+- **Jailbreak / policy divergence** — output indicating it has "accepted" an injected
+  persona or is acting against its mandate.
+- **Secret-leak attempts** — trying to emit redacted values or env-var contents.
+
+**Detection methods:** heuristic phrase/structural matching, similarity to a local
+**known-attack signature set**, and an optional **local classifier** (small model via
+Ollama — air-gapped, no content leaves the box) for fuzzy detection. Severity-scored.
+
+**Actions** map to the Ruleset Engine (§4.6): `block` (drop/neutralize the content or
+refuse the action), `require-approval` (open a HITL gate — "this looks like an
+injection attempt, proceed?"), or `warn` (annotate + log). Every finding is written to
+the **immutable audit log** with the matched signal (never raw secrets) and feeds the
+cloud's **injection-attempt anomaly detector** (§6 of the backend).
+
+**Config (per agent / global):** which directions to screen (inbound/outbound/both),
+sensitivity, whether to enable the local classifier, and the default action per
+severity. Like redaction, opt-out is explicit and audited.
 
 ### 4.6 Ruleset / Blocker Engine
 
@@ -281,9 +362,10 @@ The pause is real: the child process is suspended / awaiting, not polled.
 ### 4.8 Local Store
 
 - **SQLite (WAL mode)** for: agent definitions, schedules, the outbound telemetry
-  queue, run history cache, and HITL state.
-- Acts as the **durability boundary** — a run's results are committed locally first,
-  then shipped. Nothing is lost if the network or cloud is down.
+  queue, run history cache, HITL state, and the **run checkpoint / write-ahead journal**
+  (§4.12).
+- Acts as the **durability boundary** — a run's results (and each checkpoint) are
+  committed locally first, then shipped. Nothing is lost if the network or cloud is down.
 
 ### 4.9 Textual TUI (local front-end)
 
@@ -430,13 +512,78 @@ synapse plugin install ./my-plugin                  # install a local/unpublishe
 - A `composite`/`script` plugin's executables are **signature/checksum-verified** against
   the catalog before running, same as daemon self-updates.
 
+### 4.12 Checkpointing, Resume & Recovery
+
+Agent runs last minutes to hours and may involve expensive API calls and partial file
+operations. A crash or network blip must **never** force a restart from scratch. The
+daemon implements **durable execution**: every run advances through a write-ahead
+journal so it can be resumed from its last consistent point.
+
+#### What a checkpoint contains
+
+A checkpoint is a monotonically-numbered snapshot of **session state** for one run:
+
+- `run_id`, `agent_version`, and a **step cursor** (which step/turn is next).
+- **Agent memory**: the conversation/messages, scratchpad, and accumulated context.
+- **Current tool call**: its intent, an **idempotency key**, and status
+  (`pending → in_flight → committed`) plus the result once it returns.
+- **Progress markers**: completed sub-tasks and a **file-operation journal** (what was
+  written/changed, with hashes) for idempotent replay.
+- **Accounting so far**: tokens and cost, so resumed runs don't double-count or blow
+  past `max_cost_usd`.
+
+#### Write-ahead journaling (how it stays consistent)
+
+Checkpoints are written to the **local SQLite WAL store** as an append-only journal:
+
+1. **Before** executing a tool call, record `intent` (+ idempotency key) and commit.
+2. Execute the tool.
+3. **After** it returns, record `result` and advance the step cursor.
+
+On resume the runtime reads the journal:
+
+- A step with `intent` **and** `result` → already done, **skip** (no re-run, no
+  duplicate side effect).
+- A step with `intent` but **no** `result` → the crash happened mid-tool. The runtime
+  applies the agent's **resume policy** for ambiguous in-flight steps: re-run if the
+  tool is declared **idempotent**, else **pause for HITL** ("did this push happen?")
+  rather than risk a duplicate side effect.
+
+#### Cloud sync of checkpoints (durable backup, zero-knowledge)
+
+- Checkpoints are also shipped to the cloud as the **last-known-good state** so a run
+  survives total local loss (disk failure, machine reinstall, or moving the run to
+  another daemon).
+- Because session memory can contain sensitive data, the **checkpoint payload is
+  E2E-encrypted** to an **org recovery key** (X25519; private key held in the keychain
+  of authorized daemons in the org) before upload — reusing the env-var crypto pattern.
+  The cloud stores **opaque ciphertext** plus non-sensitive **plaintext metadata** only
+  (run_id, sequence number, step cursor, status, cost) for orchestration and dashboards.
+- Sync is **incremental** (journal deltas) and best-effort while online; if offline,
+  checkpoints queue locally and upload on reconnect.
+
+#### Recovery scenarios
+
+| Failure | What happens |
+|---------|--------------|
+| **Daemon process crash, machine intact** | On restart the daemon reads the local journal and **auto-resumes** every interrupted run from its last consistent step — no cloud round-trip needed. |
+| **Network blip, run still executing** | The run keeps going offline; checkpoints + telemetry buffer locally. On reconnect the daemon sends `run.reconcile` and **uploads the work it completed while disconnected**; live streaming resumes. |
+| **Local store lost / new daemon adopts the run** | The cloud detects heartbeat loss, marks the run `interrupted`, and on a suitable daemon reconnect issues `run.recover`. That daemon **pulls the cloud's last-known-good (encrypted) checkpoint**, decrypts it with the org recovery key, and resumes. |
+
+#### Resume policy (per agent)
+
+`auto-resume` (default) · `resume-with-approval` · `restart` · `abort`. Auto-resume
+honors the idempotency/HITL safety check above, so "without manual intervention" never
+means "blindly repeat a dangerous action."
+
 ---
 
 ## 5. Security Posture
 
 - Secrets (provider API keys, daemon refresh token) live **only** in the OS keychain.
-- Outbound-only WSS connection — the daemon **never opens an inbound port**, so no
-  firewall changes and no attack surface from the public internet.
+- Outbound-only gRPC/HTTP-2 connection — the daemon (the gRPC client) **never opens an
+  inbound port**, so no firewall changes and no attack surface from the public internet.
+  Even the server→daemon command stream rides the daemon-initiated bidirectional RPC.
 - Redaction + rulesets enforced locally; the cloud cannot exfiltrate raw secrets even
   if compromised, because they are masked before transmission.
 - **Env vars are E2E-encrypted**: the daemon's X25519 private key never leaves the
@@ -464,8 +611,8 @@ synapse plugin install ./my-plugin                  # install a local/unpublishe
 | Async core | `asyncio` |
 | TUI | Textual |
 | CLI | Typer / Click |
-| WebSocket client | `websockets` / `aiohttp` |
-| Wire format | MessagePack |
+| Transport / RPC | gRPC over HTTP/2 (`grpcio`, grpc.aio async client) |
+| Wire format | Protocol Buffers (`grpcio-tools` codegen) |
 | Scheduler | APScheduler |
 | Local store | SQLite (WAL) |
 | PII detection | regex + entropy + optional Presidio |
@@ -473,6 +620,7 @@ synapse plugin install ./my-plugin                  # install a local/unpublishe
 | Secret / env-var storage | OS keychain (`keyring`) |
 | E2E encryption | X25519 sealed box (`PyNaCl` / libsodium) |
 | Plugins / capabilities | MCP servers + scripts; isolated venvs/workspaces per plugin |
+| Durable execution | SQLite write-ahead checkpoint journal + idempotency keys |
 | Packaging | PyPI (`synapse-worker`), pipx |
 
 See **[integration.md](integration.md)** for how the daemon, cloud, and Web UI form
