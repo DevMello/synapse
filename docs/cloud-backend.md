@@ -39,16 +39,16 @@ Its responsibilities:
 ## 2. High-Level Architecture
 
 ```
-                       ┌────────────────────────────────────────────────┐
-   Daemons  ──gRPC──►   │           Custom Realtime Tier (FastAPI)        │
-   (TUI)    (HTTP/2)    │  ┌──────────────┐   ┌────────────────────────┐  │
-                       │  │ REST API     │   │   gRPC Daemon Hub       │  │
-                       │  │ (FastAPI)    │   │  (device-token auth,    │  │
-                       │  └──────┬───────┘   │   strict delivery/HITL) │  │
-                       │         │           └────────────┬───────────┘  │
-                       └─────────┼────────────────────────┼──────────────┘
+                       ┌────── Cloud Backend host (single machine) ──────┐
+   Daemons  ──gRPC──►   │  ┌────────────┐ ┌──────────┐ ┌──────────────┐  │
+   (TUI)    (HTTP/2)    │  │ Web UI     │ │ REST API │ │  gRPC Daemon │  │
+                       │  │ static     │ │ (FastAPI)│ │  Hub (device │  │
+                       │  │ bundle     │ │          │ │  auth, HITL) │  │
+                       │  └─────┬──────┘ └────┬─────┘ └──────┬───────┘  │
+                       │        └─ one reverse proxy ─┘      │           │
+                       └────────────────┼───────────────────┼───────────┘
                                  │                         │
-   Browsers  ──HTTPS───────────► │ (REST)                  │ (publishes telemetry)
+   Browsers  ──HTTPS───────────► │ (load app + REST, one origin)         │ (publishes telemetry)
    (Web UI)  ──WSS───────────────┼──────────► Supabase Realtime ◄──────┘
                                  │            (Broadcast + Presence → browser fan-out)
               ┌──────────────────┼──────────────────────────────────────────┐
@@ -66,6 +66,12 @@ Its responsibilities:
         └──────────────────────────────────────┘
 ```
 
+> **Co-location note:** the **Web UI and the Cloud Backend run on the same host** — one
+> deployment unit. A single reverse proxy on that machine (or FastAPI's static mount)
+> serves the built Web UI bundle, the REST API, and the gRPC daemon hub, so the browser
+> loads the app and calls REST on **one origin (no CORS)**. The gRPC hub listens on the
+> same host for daemon links. Supabase and the daemons stay separate.
+>
 > **Stack note:** Supabase consolidates Postgres (records + audit + telemetry),
 > Auth (browser/user identity), Storage (blobs), and Realtime (browser fan-out) into
 > one managed service. A **thin custom gRPC hub** (served by grpc.aio alongside FastAPI)
@@ -143,8 +149,16 @@ Core entities:
   X25519 public key used to encrypt run checkpoints; private half lives only in
   authorized daemons' keychains).
 - **users** — accounts; belong to orgs via **memberships** (role: owner/admin/operator/viewer).
-- **daemons** — registered workers: name, tags, platform, version, last_seen, status,
-  **e2e_public_key** (X25519 public key; the matching private key never leaves the daemon).
+- **daemons** — registered workers: name, tags, platform, version, status,
+  **device identity** (hostname, os_version, last_ip, last_seen — powers the Web UI's
+  "logged in on *my-macbook-pro*, last seen 2m ago"), **refresh_token_hash** + issuance
+  time, **revoked_at** (null = active), and **e2e_public_key** (X25519 public key; the
+  matching private key never leaves the daemon).
+- **device_authorizations** — short-lived rows backing the device-code login (§5):
+  hashed `device_code`, `user_code` (`ABCD-1234`), status (`pending`/`authorized`/
+  `denied`/`expired`), requested device metadata (hostname/os/ip), the authorizing
+  `user_id` + `org_id` (set on approval), `interval`, `created_at`, `expires_at`. Purged
+  after expiry/use.
 - **agents** — agent definitions: name, type (api/cli), platform, owning daemon,
   current_version, limits, status.
 - **agent_versions** — immutable prompt/config snapshots (see Versioning §8).
@@ -198,6 +212,9 @@ org's rows — even through the auto-generated Supabase data APIs.
 - **Supabase Realtime** for browser-facing live updates.
 - **Inbound webhook endpoints** (`/hooks/{token}`) that authenticate, validate, and
   translate external events into `agent.run` commands routed to the right daemon.
+- **Daemon auth endpoints**: `POST /auth/device/code`, `POST /auth/device/token`
+  (polling), `POST /auth/token` (refresh, rotating), and `POST /daemons/{id}/revoke`
+  (RBAC-gated) — the OAuth 2.0 Device Authorization Grant detailed below.
 
 ### Auth (two identity planes)
 
@@ -209,6 +226,64 @@ org's rows — even through the auto-generated Supabase data APIs.
   to a single daemon. This token is presented as gRPC call metadata (validated by a
   server interceptor) to authenticate the daemon stream, and is what RLS checks for
   daemon-originated writes.
+
+#### Daemon login — OAuth 2.0 Device Authorization Grant (RFC 8628)
+
+A headless daemon (often on a VPS with no browser) must authenticate **without ever
+typing the user's password into the terminal**. The device-code flow solves this: the
+user proves identity in the *browser* (where they already have a Supabase session), and
+the terminal only ever receives a scoped, revocable token.
+
+```
+TUI                         Cloud Backend                         Web UI (browser)
+ │  POST /auth/device/code  │                                      │
+ │  {hostname, os, version} │                                      │
+ │ ───────────────────────► │  create device_authorizations row    │
+ │                          │  (status=pending, TTL ~10m)           │
+ │ ◄─────────────────────── │  {device_code, user_code "ABCD-1234", │
+ │                          │   verification_uri, expires_in,       │
+ │                          │   interval: 5}                        │
+ │                          │                                      │
+ │  print user_code + URL   │              user visits URL, logs in │
+ │                          │              enters ABCD-1234, Confirm│
+ │  POST /auth/device/token │ ◄──────────────────────────────────  │
+ │  {device_code}  (×5s)    │  mark row authorized + bind org/user  │
+ │ ───────────────────────► │  create daemons row + issue tokens    │
+ │ ◄─────────────────────── │  {access_token, refresh_token}        │
+ │  store tokens in keyring │                                      │
+```
+
+**Endpoints**
+
+- `POST /auth/device/code` — **unauthenticated**. The daemon sends device metadata
+  (`hostname`, `os_version`, daemon `version`; the cloud also records the request's
+  source IP). Returns `device_code` (opaque, stored hashed), `user_code` (human-readable
+  8-char `ABCD-1234`), `verification_uri` (+ `verification_uri_complete` with the code
+  pre-filled for QR/click), `expires_in` (~600s), and `interval` (poll seconds, e.g. 5).
+- `POST /auth/device/token` — **polling**, unauthenticated, sends the `device_code`.
+  Mirrors RFC 8628 responses: `authorization_pending` (keep polling), `slow_down`
+  (back off the interval), `access_denied` (user rejected), `expired_token` (restart),
+  or **success** → `{access_token (short-lived, ~15m JWT), refresh_token (long-lived,
+  rotating), token_type, expires_in}`.
+- `POST /auth/token` — **refresh**: exchange the refresh token for a new access token;
+  the **refresh token is rotated** on every use (old one invalidated → detects token
+  theft/replay).
+
+**Authorization (Web UI side)** — the user opens `verification_uri`, is already
+authenticated via **Supabase Auth**, enters the `user_code`, and confirms. The backend
+validates the code (unexpired, pending), shows the **requesting device's metadata** for
+the user to verify ("`my-macbook-pro`, macOS 15.3, from 203.0.113.7 — approve?"), then
+flips the row to `authorized`, **binds it to the user's `org_id`**, and provisions the
+`daemons` row. Codes are single-use and rate-limited; entropy makes `user_code` guessing
+infeasible within the TTL.
+
+**Revocation** — the cloud keeps the issued refresh token (hashed) tied to the daemon.
+A **Revoke** action in the Web UI (or losing a device) sets the daemon `revoked_at`,
+**invalidates the refresh token** (so it can never mint a new access token) and **tears
+down the daemon's live gRPC stream immediately** (the hub closes `Connect` with
+`UNAUTHENTICATED`). The short-lived access token expires on its own within minutes;
+revocation needs **no change to the user's primary password** and affects only that one
+device.
 
 ---
 
@@ -380,6 +455,10 @@ The cloud brokers agent env vars **without ever being able to read their values*
   Postgres (or a small Redis if cross-node pub/sub fan-out is needed at scale). Each
   daemon's long-lived stream is pinned to one node, so an L4/HTTP-2-aware load balancer
   (or Redis-backed routing) directs a daemon-bound command to the node holding its stream.
+- **Co-located frontend**: the Web UI is a static bundle, so it ships with each backend
+  node (served by the same reverse proxy / static mount) and replicates for free — it
+  adds no state and doesn't constrain horizontal scaling. Start as a single host;
+  add nodes behind the LB when REST/gRPC load grows.
 - **Async workers (Celery/Arq)** for analytics rollups, anomaly scans, notification
   fan-out, and webhook processing — decoupled from request latency.
 - **Storage tiering (all Supabase)**: Postgres (records/audit + partitioned telemetry +

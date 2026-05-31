@@ -29,8 +29,24 @@ product-design stage (docs only, no code yet).
   gRPC gives no cross-reconnect redelivery, so at-least-once + idempotency keys + seq/acks
   stay at the app layer (SQLite WAL offline buffer unchanged). **ClickHouse dropped from
   MVP** — partitioned Postgres handles telemetry; add columnar store only if analytics
-  degrade. Daemon auth = custom OAuth device-code (daemons aren't Supabase Auth users).
-  Watch telemetry write volume/cost → batch/downsample. Details: docs/cloud-backend.md
+  degrade. Daemon auth = **custom OAuth 2.0 Device Authorization Grant (RFC 8628, decided
+  2026-05-31)**: `synapse login` → `POST /auth/device/code` (sends hostname/OS/version) →
+  `user_code` (`ABCD-1234`)+`verification_uri`+`interval`; daemon polls
+  `/auth/device/token` (`authorization_pending`/`slow_down`); user approves in the
+  already-authenticated Web UI (shown the device metadata first); daemon then gets a
+  short-lived access token + **rotating** refresh token → OS keyring (0600 encrypted-file
+  fallback on headless VPS). **No password ever typed in the terminal.** Per-device tokens
+  are **revocable** from the Web UI Daemons list (sets `revoked_at`, kills refresh token,
+  closes the gRPC stream) — no password change, other daemons unaffected. Device identity
+  = hostname/OS/last_ip/last_seen ("logged in on my-macbook-pro, last seen 2m ago"). Data:
+  `device_authorizations` table + `daemons` gains device-identity + refresh_token_hash +
+  revoked_at. (daemons aren't Supabase Auth users.)
+  Watch telemetry write volume/cost → batch/downsample. **Deployment (2026-05-31): Web
+  UI and Cloud Backend run on the SAME host** (one deployment unit) — a single reverse
+  proxy / FastAPI static mount serves the Web UI bundle + REST + gRPC hub, so the browser
+  loads the app and hits REST on ONE origin (no CORS). Supabase + daemons stay separate;
+  static frontend replicates per node so horizontal scaling is unaffected.
+  Details: docs/cloud-backend.md
 - **Web UI** — React/TS control surface. One-click agent deploy, Markdown prompt
   editor, versioning+diff+rollback, live trace viewer, analytics, approvals queue,
   marketplaces. Details: docs/web-ui.md

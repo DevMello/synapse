@@ -18,6 +18,12 @@ time.
 It must make a fundamentally distributed, multi-machine system feel like a single,
 coherent app: "click a button, pick a daemon, an agent is live."
 
+> **Deployment:** the Web UI ships as a static bundle **served from the same host as the
+> Cloud Backend** (one deployment unit, behind one reverse proxy or FastAPI's static
+> mount). The browser therefore loads the app and calls the REST API on **one origin —
+> no CORS**. It still talks to **Supabase** (Auth/Realtime/data API) directly as an
+> external service, and never to a daemon.
+
 ---
 
 ## 2. Tech Stack
@@ -33,6 +39,7 @@ coherent app: "click a button, pick a daemon, an agent is live."
 | Markdown editor | CodeMirror 6 / Monaco with live preview |
 | Diff view | Monaco diff editor (prompt versioning) |
 | Auth | **Supabase Auth** (`supabase-js`) — JWT carries `org_id`/role for RLS |
+| Hosting | Built bundle served by the **Cloud Backend host** (same origin as REST; one reverse proxy / FastAPI static mount) |
 
 - **Hybrid data model**: slow-changing config via REST + the Supabase data API
   (cached by TanStack Query, gated by RLS); fast-changing telemetry via **Supabase
@@ -46,7 +53,8 @@ coherent app: "click a button, pick a daemon, an agent is live."
 ```
 Synapse
 ├── Dashboard          (fleet overview: daemons, agents, alerts, spend)
-├── Daemons            (registered workers + uptime monitoring)
+├── Daemons            (registered workers + uptime monitoring + revoke)
+├── Connect a device   (device-code verification page: enter ABCD-1234, approve)
 ├── Agents             (the core: list, detail, builder)
 │   └── Agent Detail
 │       ├── Overview   (status, availability, next run, recent runs)
@@ -86,9 +94,28 @@ Fleet-wide health at a glance:
 
 - List of registered workers: name, tags, platform, version, **status (online/offline)**,
   last-seen, resource usage (CPU/mem), active-run count.
+- **Device identity** per daemon: hostname, OS version, and last-seen IP, rendered as
+  "logged in on **my-macbook-pro** (macOS 15.3) — last seen 2 minutes ago", so a user can
+  recognize each session at a glance.
 - **Uptime monitoring** per daemon: availability %, downtime incidents timeline,
   heartbeat history. Configurable offline-alert thresholds.
-- Pairing flow: shows the device-code/instructions to connect a new daemon.
+- **Revoke** (per daemon): one click invalidates that device's tokens and drops its live
+  connection — for a lost laptop or decommissioned VPS — **without changing the user's
+  password** and without touching any other daemon. Shows a confirm dialog with the
+  device's identity so the right session is killed.
+
+#### Pairing a new daemon (device-code login)
+
+Running `synapse login` on a machine starts the **OAuth 2.0 Device Authorization Grant**.
+The Web UI side is a short **verification page** at the `verification_uri`:
+
+1. The user (already signed in via **Supabase Auth**) lands on **Connect a device** and
+   enters the **`user_code`** (`ABCD-1234`) the CLI printed — or follows the
+   `verification_uri_complete` link/QR that pre-fills it.
+2. The page shows the **requesting device's metadata** (hostname, OS, source IP) for the
+   user to verify before approving — defense against a code phished onto the wrong device.
+3. **Confirm** authorizes the device; it binds to the user's org and appears in the
+   Daemons list as online. **Deny** rejects it. Codes expire (~10 min) and are single-use.
 
 ### 4.3 Agents
 

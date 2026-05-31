@@ -55,11 +55,34 @@ synapse daemon install # registers as a system service (see below)
 synapse daemon start
 ```
 
-`synapse login` uses the **OAuth 2.0 Device Authorization Grant**: the CLI prints a
-short code + URL, the user approves in the browser (already authenticated to Synapse),
-and the daemon receives a long-lived **refresh token** + short-lived **access token**.
-The refresh token is stored in the OS keychain (Keychain on macOS, Credential Manager
-on Windows, Secret Service / libsecret on Linux), never in plaintext on disk.
+`synapse login` uses the **OAuth 2.0 Device Authorization Grant** (RFC 8628) — the user
+never types their password into the terminal:
+
+1. **Challenge** — the CLI makes an unauthenticated `POST /auth/device/code`, sending
+   **device metadata** (`hostname`, `os_version`, daemon `version`; the cloud also notes
+   the source IP). It receives a `device_code`, a human-readable `user_code`
+   (`ABCD-1234`), a `verification_uri`, and a poll `interval` (~5s).
+2. **Prompt** — the CLI prints the `user_code` + URL (and a QR for the
+   `verification_uri_complete`). The user opens it in a browser where they're already
+   authenticated to Synapse, enters the code, sees this device's metadata, and confirms.
+3. **Poll** — meanwhile the CLI polls `POST /auth/device/token` every `interval`
+   seconds, handling `authorization_pending` / `slow_down` until the user approves
+   (or `access_denied` / `expired_token`).
+4. **Finalize** — on approval the daemon receives a short-lived **access token** (~15m)
+   + a long-lived **refresh token**, and is now a registered daemon in the user's org.
+
+Tokens are stored in the **OS keychain** (Keychain on macOS, Credential Manager on
+Windows, Secret Service / libsecret on Linux), never in plaintext on disk. The refresh
+token **rotates** on every refresh. On a headless box with no keychain (some VPS/Linux),
+the daemon falls back to an **encrypted token file** under `~/.synapse/` written with
+**`0600` perms** (owner-only; on Windows, an ACL restricted to the daemon's user) — and
+any on-disk config/state under `~/.synapse/` is created with the same restrictive perms
+so other local users can't read it.
+
+**Why this is safe:** the terminal only ever holds a scoped, **revocable** token — never
+the user's primary credentials. If the machine is compromised or lost, the user clicks
+**Revoke** for that one device in the Web UI (cloud invalidates its refresh token and
+drops its live stream) — no password change, no impact on other daemons.
 
 On first pairing the daemon also generates an **end-to-end encryption keypair**
 (X25519, libsodium). The **private key stays in the OS keychain and never leaves the
@@ -580,7 +603,14 @@ means "blindly repeat a dangerous action."
 
 ## 5. Security Posture
 
-- Secrets (provider API keys, daemon refresh token) live **only** in the OS keychain.
+- Secrets (provider API keys, daemon refresh token) live **only** in the OS keychain;
+  the keyless headless fallback is an encrypted file with **`0600`** perms (Windows: a
+  user-scoped ACL), as is all on-disk state under `~/.synapse/`.
+- **No passwords in the terminal**: `synapse login` uses the device-code grant, so a
+  compromised terminal yields only a **short-lived, revocable access token** — not the
+  user's primary credentials. Each daemon session is **independently revocable** from the
+  Web UI without a password change (cloud invalidates the refresh token + drops the
+  stream), so a lost laptop/VPS is contained instantly.
 - Outbound-only gRPC/HTTP-2 connection — the daemon (the gRPC client) **never opens an
   inbound port**, so no firewall changes and no attack surface from the public internet.
   Even the server→daemon command stream rides the daemon-initiated bidirectional RPC.

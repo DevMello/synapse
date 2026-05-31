@@ -19,9 +19,20 @@ Synapse is a **control-plane / data-plane** split with a broker in the middle:
    │   Web UI     │ ◄───────────────────────► │  Cloud Backend   │ ◄────────────────► │  TUI Daemon(s)   │
    │  (browser)   │     commands / telemetry  │   (broker +      │   commands /       │  (user machines) │
    │ CONTROL PLANE│                           │    historian)    │   telemetry        │   DATA PLANE     │
-   └──────────────┘                           └──────────────────┘                    └──────────────────┘
+   └──────┬───────┘                           └────────┬─────────┘                    └──────────────────┘
         sees                                    routes + stores                          executes + protects
+          └──── served from the same host ───────────┘
 ```
+
+**Deployment topology:** the **Web UI and Cloud Backend run on the same machine** — one
+deployment unit. A single reverse proxy on that host (or FastAPI's own static mount)
+serves the built Web UI bundle, the REST API, and the gRPC daemon hub. So the browser
+loads the app and makes its REST calls against **one origin** (no CORS), while the gRPC
+hub listens on the same host for daemon links. **Supabase** (Postgres/Auth/Storage/
+Realtime) remains an external managed service both the browser and the backend talk to,
+and the **daemons** are always separate (on users' own machines). Co-locating the
+frontend doesn't change the broker model: the cloud is still the only endpoint the
+browser and daemon each know about, and the three invariants below are unaffected.
 
 Three invariants define every interaction:
 
@@ -37,9 +48,14 @@ Three invariants define every interaction:
 ## 2. Connection Establishment
 
 ### Daemon ↔ Cloud (custom gRPC hub, HTTP/2)
-1. User installs `synapse-worker`, runs `synapse login` → **custom OAuth device-code
-   flow** (daemons are not Supabase Auth users — they get their own daemon token).
-2. Daemon receives a refresh token (stored in OS keychain) + access token.
+1. User installs `synapse-worker`, runs `synapse login` → **OAuth 2.0 Device
+   Authorization Grant** (daemons aren't Supabase Auth users — they get their own daemon
+   token). The CLI gets a `user_code` (`ABCD-1234`) + URL from `/auth/device/code`
+   (sending hostname/OS/version), the user approves it in the **already-authenticated Web
+   UI**, and the CLI's polling of `/auth/device/token` then returns the tokens. No
+   password is ever typed in the terminal. (Full handshake in cloud-backend.md §5.)
+2. Daemon receives a rotating refresh token + short-lived access token (stored in the OS
+   keychain; `0600` encrypted-file fallback on headless boxes).
 3. Daemon opens an outbound **gRPC connection (HTTP/2)** to the **custom hub**, presenting
    the access token as call metadata (optionally mTLS), and opens its `Connect` bidi
    stream + `IngestTelemetry` stream, registering (name, tags, platform, version).
@@ -49,6 +65,8 @@ Three invariants define every interaction:
    uptime + offline alerts.
 
 ### Browser ↔ Cloud (Supabase)
+0. Browser loads the Web UI bundle from the **Cloud Backend host** (same machine that
+   serves the REST API) — one origin, so REST calls need no CORS.
 1. User logs in via **Supabase Auth** (GoTrue: OAuth providers / email). The JWT
    carries `org_id`/role claims used by RLS.
 2. Browser subscribes to live resources via **Supabase Realtime** (Broadcast +
@@ -83,6 +101,7 @@ RBAC-checks, persists, and publishes to the target daemon's channel:
 | Approve/deny HITL | write audit + decision | `hitl.resolve` |
 | Resume interrupted run | mark `recovering`, hand off checkpoint | `run.recover` |
 | Rollback to version | set `current_version` | `agent.update_prompt` |
+| Revoke a daemon | set `revoked_at`, kill refresh token | (hub closes the stream `UNAUTHENTICATED`) |
 
 ### Upstream: telemetry (Daemon → Cloud → Browser)
 
@@ -106,6 +125,32 @@ blobs) **and** publishes it to a Supabase Realtime channel for any subscribed br
 ---
 
 ## 4. End-to-End Walkthroughs
+
+### 4.0 Pair a new daemon (device-code login)
+
+```
+TUI: `synapse login`
+   │  POST /auth/device/code { hostname:"vps-01", os:"ubuntu 24.04", version }
+   ▼
+Cloud: device_authorizations(pending, TTL 10m) → { user_code "ABCD-1234",
+       verification_uri, interval:5 }
+   │  TUI prints code + URL (+ QR), starts polling /auth/device/token every 5s
+   ▼
+Browser (already logged in via Supabase Auth): open URL → enter ABCD-1234
+   │  sees requesting device "vps-01, ubuntu 24.04, from 203.0.113.7" → Confirm
+   ▼
+Cloud: mark authorized + bind org/user → create daemons row → next poll returns
+       { access_token (~15m), refresh_token (rotating) }
+   ▼
+TUI: store tokens in OS keyring (0600 file fallback) → open gRPC stream (4.1)
+   ▼
+Browser: Daemons list shows "vps-01 — online, last seen now" + a Revoke button
+
+   ── later: lost VPS ──
+Browser: Daemons → vps-01 → Revoke
+   ▼  Cloud: set revoked_at, invalidate refresh token, close its gRPC stream
+      (UNAUTHENTICATED). No password change; other daemons unaffected.
+```
 
 ### 4.1 Create and run an agent (one click → live)
 
