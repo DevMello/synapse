@@ -1,8 +1,9 @@
 """Inbound daemon-message handler registry: daemon → cloud.
 
-The gRPC hub (unit 2) receives `Envelope` frames on the Connect stream and
-`TelemetryFrame`s on IngestTelemetry, then calls `dispatch(type, ctx, payload)`.
-Feature units register handlers without editing the hub:
+The WebSocket hub (unit 2) receives `DaemonMessage` frames on the control channel
+and telemetry frames on the telemetry channel, then calls
+`dispatch(type, ctx, payload)`. Feature units register handlers without editing
+the hub:
 
     from synapse_cloud.message_registry import on_daemon_message
 

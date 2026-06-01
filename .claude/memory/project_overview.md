@@ -11,23 +11,26 @@ product-design stage (docs only, no code yet).
 - **TUI Worker Daemon** — Python (`synapse-worker` on PyPI) installed on user
   machines. Executes agents (API + CLI tools like `claude code`), redacts PII/secrets
   on-device, enforces rulesets/blockers, handles HITL pauses, connects outbound-only
-  via **gRPC (HTTP/2, grpcio/grpc.aio, Protocol Buffers)** — a bidirectional `Connect`
-  stream for control+HITL (daemon-initiated, so cloud→daemon commands need no inbound
-  port) + a client-streaming `IngestTelemetry` RPC for the trace firehose, multiplexed
-  over one HTTP/2 connection. Has a Textual TUI. **Agent env vars: E2E-encrypted (X25519/libsodium
+  via **WebSockets (WSS, JSON, `websockets` async client)** — a bidirectional control
+  channel (`/ws/daemon`) for control+HITL (daemon-initiated, so cloud→daemon commands
+  need no inbound port) + a separate telemetry channel (`/ws/daemon/telemetry`) for the
+  trace firehose (kept off the control path to avoid head-of-line blocking). Has a
+  Textual TUI. **Agent env vars: E2E-encrypted (X25519/libsodium
   sealed box) — daemon holds private key, browser encrypts to its public key, cloud
   relays opaque ciphertext + stores var NAMES only (never values); daemon decrypts to
   OS keyring and injects at run time. Can also set vars locally via `synapse env set`.**
   Details: docs/tui-daemon.md
 - **Cloud Backend** — FastAPI broker/historian. **Stack decision (2026-05-29): use
   Supabase** for Postgres+RLS (records/audit/telemetry), Auth (browser users), Storage
-  (blobs), and Realtime (browser fan-out). Keep a **thin custom gRPC hub (grpc.aio over
-  HTTP/2, Protocol Buffers) only for the daemon link** (needs device-token auth in call
-  metadata + strict at-least-once delivery for commands/HITL that Supabase Realtime isn't
-  shaped for). **Transport decision (2026-05-31): daemon link is gRPC, NOT WebSockets**
-  (browser link stays Supabase Realtime/WSS — gRPC-Web is weaker for browser pub/sub).
-  gRPC gives no cross-reconnect redelivery, so at-least-once + idempotency keys + seq/acks
-  stay at the app layer (SQLite WAL offline buffer unchanged). **ClickHouse dropped from
+  (blobs), and Realtime (browser fan-out). Keep a **thin custom WebSocket hub (FastAPI
+  WebSocket routes, JSON) only for the daemon link** (needs device-token auth on the
+  handshake + strict at-least-once delivery for commands/HITL that Supabase Realtime isn't
+  shaped for). **Transport decision (REVISED 2026-05-31): daemon link is WebSockets, NOT
+  gRPC** — reverted from an earlier gRPC decision the same day to keep the wire JSON,
+  drop the protobuf/grpcio toolchain, and serve the hub on the same FastAPI app/port as
+  REST (no separate grpc.aio server). Browser link stays Supabase Realtime/WSS.
+  A WebSocket gives no cross-reconnect redelivery, so at-least-once + idempotency keys +
+  seq/acks stay at the app layer (SQLite WAL offline buffer unchanged). **ClickHouse dropped from
   MVP** — partitioned Postgres handles telemetry; add columnar store only if analytics
   degrade. Daemon auth = **custom OAuth 2.0 Device Authorization Grant (RFC 8628, decided
   2026-05-31)**: `synapse login` → `POST /auth/device/code` (sends hostname/OS/version) →
@@ -37,13 +40,13 @@ product-design stage (docs only, no code yet).
   short-lived access token + **rotating** refresh token → OS keyring (0600 encrypted-file
   fallback on headless VPS). **No password ever typed in the terminal.** Per-device tokens
   are **revocable** from the Web UI Daemons list (sets `revoked_at`, kills refresh token,
-  closes the gRPC stream) — no password change, other daemons unaffected. Device identity
+  closes the WebSocket with close code 4401) — no password change, other daemons unaffected. Device identity
   = hostname/OS/last_ip/last_seen ("logged in on my-macbook-pro, last seen 2m ago"). Data:
   `device_authorizations` table + `daemons` gains device-identity + refresh_token_hash +
   revoked_at. (daemons aren't Supabase Auth users.)
   Watch telemetry write volume/cost → batch/downsample. **Deployment (2026-05-31): Web
   UI and Cloud Backend run on the SAME host** (one deployment unit) — a single reverse
-  proxy / FastAPI static mount serves the Web UI bundle + REST + gRPC hub, so the browser
+  proxy / FastAPI static mount serves the Web UI bundle + REST + WebSocket hub, so the browser
   loads the app and hits REST on ONE origin (no CORS). Supabase + daemons stay separate;
   static frontend replicates per node so horizontal scaling is unaffected.
   Details: docs/cloud-backend.md

@@ -3,7 +3,7 @@
 Feature units push commands (agent.deploy, agent.run, env.set, hitl.resolve, ...)
 by calling `get_command_bus().send(...)`. They depend only on this interface.
 
-The real implementation is provided by the gRPC hub (unit 2), which registers
+The real implementation is provided by the WebSocket hub (unit 2), which registers
 itself via `set_command_bus()` at hub startup. Until then (and in tests) the
 default `InMemoryCommandBus` records sent commands so handlers and tests work
 standalone.
@@ -32,14 +32,14 @@ class DaemonCommandBus(abc.ABC):
         *,
         idempotency_key: Optional[str] = None,
     ) -> CommandResult:
-        """Deliver a command to a daemon's Connect stream (at-least-once)."""
+        """Deliver a command to a daemon's control channel (at-least-once)."""
 
     @abc.abstractmethod
     def is_connected(self, daemon_id: str) -> bool:
         ...
 
     async def close_stream(self, daemon_id: str, reason: str) -> None:
-        """Tear down a daemon's stream (e.g. on revocation). Optional."""
+        """Tear down a daemon's WebSocket (e.g. on revocation). Optional."""
         return None
 
 
@@ -81,6 +81,6 @@ def get_command_bus() -> DaemonCommandBus:
 
 
 def set_command_bus(bus: DaemonCommandBus) -> None:
-    """Install the real (gRPC-backed) bus. Called by the hub at startup."""
+    """Install the real (WebSocket-backed) bus. Called by the hub at startup."""
     global _bus
     _bus = bus

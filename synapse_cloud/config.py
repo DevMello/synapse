@@ -19,9 +19,7 @@ class Settings(BaseSettings):
     daemon_access_token_ttl_seconds: int = 900
     device_code_ttl_seconds: int = 600
 
-    # gRPC hub
-    grpc_host: str = "0.0.0.0"
-    grpc_port: int = 50051
+    # WebSocket daemon hub
     hub_node_id: str = "local"
 
     # Async workers

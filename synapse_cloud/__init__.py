@@ -5,7 +5,7 @@ foundation (this package's top-level modules) provides shared seams that feature
 modules plug into without editing each other's files:
 
   * config.py / db.py / deps.py / rbac.py / security.py — settings, DB, auth.
-  * command_bus.py     — outbound commands to daemons (real impl = gRPC hub).
+  * command_bus.py     — outbound commands to daemons (real impl = WebSocket hub).
   * message_registry.py — inbound daemon-message handler registry.
   * realtime.py / storage.py / audit.py / notifications — side-effect seams.
   * app.py             — FastAPI factory with router + lifespan autodiscovery.

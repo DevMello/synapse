@@ -4,8 +4,8 @@ Routers are autodiscovered: every module under `synapse_cloud.routers` that
 exposes a module-level `router` (an `APIRouter`) is included automatically, so
 feature units never edit this file — they drop a router module and it appears.
 
-The lifespan starts/stops the gRPC daemon hub (overridden by unit 2) so the hub
-shares the app process. The Arq worker runs as a separate process
+The lifespan starts/stops the WebSocket daemon hub (overridden by unit 2) so the
+hub shares the app process. The Arq worker runs as a separate process
 (`arq synapse_cloud.workers.WorkerSettings`), not in the web app.
 """
 from __future__ import annotations
@@ -17,7 +17,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, FastAPI
 
-from . import grpc_hub
+from . import ws_hub
 from .config import get_settings
 
 
@@ -37,11 +37,11 @@ def _discover_routers() -> list[APIRouter]:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    await grpc_hub.startup(app)
+    await ws_hub.startup(app)
     try:
         yield
     finally:
-        await grpc_hub.shutdown(app)
+        await ws_hub.shutdown(app)
 
 
 def create_app() -> FastAPI:

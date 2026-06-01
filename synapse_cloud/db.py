@@ -2,7 +2,7 @@
 
 Two access modes:
   * `service_db()` — uses the service_role key, BYPASSES RLS. Used by the backend
-    for server-side work (gRPC hub writes, async workers, daemon-originated rows)
+    for server-side work (WebSocket hub writes, async workers, daemon-originated rows)
     and by REST handlers that have already resolved+checked the caller's org via
     the auth dependency. Always scope queries by org_id yourself in this mode.
   * `user_db(access_token)` — uses the anon key + the caller's Supabase JWT, so

@@ -2,7 +2,7 @@
 
 Daemon tokens are NOT Supabase Auth tokens — daemons get their own HS256 JWT
 (short-lived access token) minted by the device-code flow (unit 1) and validated
-by the gRPC interceptor (unit 2) and the revoke endpoint (unit 4). Keeping the
+by the WebSocket hub's auth dependency (unit 2) and the revoke endpoint (unit 4). Keeping the
 encode/decode/hash helpers here lets those units share them without importing
 each other's files.
 """

@@ -1,7 +1,7 @@
 """Browser fan-out seam: publish events to Supabase Realtime Broadcast channels.
 
 Channels are keyed by tenant + resource, e.g. `org:{id}:agent:{id}` or
-`org:{id}:daemon:{id}`. The gRPC hub and async workers publish here; subscribed
+`org:{id}:daemon:{id}`. The WebSocket hub and async workers publish here; subscribed
 browsers receive via supabase-js. In test mode a fake records published events.
 """
 from __future__ import annotations

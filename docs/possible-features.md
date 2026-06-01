@@ -35,11 +35,11 @@ These features do **not** break the platform's invariants
 ([integration §6](integration.md)):
 
 - **Browser ⇄ daemon never talk directly** — agent-initiated commands still flow
-  agent → its daemon → outbound gRPC → cloud broker → target. The cloud still brokers.
+  agent → its daemon → outbound WebSocket → cloud broker → target. The cloud still brokers.
 - **Cloud never executes agents / holds raw secrets** — execution stays on the daemon;
   the cloud authorizes/audits/orchestrates only.
-- **Daemon is outbound-only** — agents ride the existing daemon-initiated gRPC `Connect`
-  stream; no inbound port is opened.
+- **Daemon is outbound-only** — agents ride the existing daemon-initiated WebSocket
+  control channel; no inbound port is opened.
 
 What is genuinely new: an **agent identity** as a first-class principal, and a small
 amount of **delegated-authority machinery** (grants, lineage, delegated approval).
@@ -79,7 +79,7 @@ Daemon orchestration broker (LOCAL)
   ▼
   child run executes on the SAME daemon; telemetry streams to caller (tool result)
   ▼
-async: audit event + lineage + telemetry → cloud (IngestTelemetry / Connect)
+async: audit event + lineage + telemetry → cloud (telemetry / control channel)
        cloud anomaly detector watches orchestration rate; can revoke / kill
 ```
 
@@ -555,8 +555,8 @@ otherwise unchanged — this is the cheapness of the feature.
 - **Downstream** (cloud → daemon): `agent.compare { agent_id, models[], input, group_id,
   group_cost_cap, max_parallel_variants }` — launches the group.
 - **Downstream**: `comparison.cancel { group_id }` — stop all variants.
-- **Upstream**: variants stream over the existing `IngestTelemetry` RPC tagged with
-  `run_group_id` / `variant_model`; group status rides the `Connect` stream.
+- **Upstream**: variants stream over the existing telemetry channel tagged with
+  `run_group_id` / `variant_model`; group status rides the control channel.
 - The winner's optional live run is just an ordinary `agent.run` with a single pinned model.
 
 ### 10.12 Web UI
@@ -643,7 +643,7 @@ Daemon handoff broker (LOCAL)
   ▼
 "critic" runs, may hand off onward: synapse.handoff("executor", …)   (hop 2, root still R)
   ▼
-async: handoff audit event + lineage → cloud (Connect); telemetry → IngestTelemetry
+async: handoff audit event + lineage → cloud (control channel); telemetry → telemetry channel
        Web UI renders R as one trace: planner ▸ critic ▸ executor
 ```
 
@@ -983,8 +983,8 @@ findings only** (G3).
 | `tool_calls` | += `blast_radius_class`, `intent_authorized` (bool), `drift_score` |
 | `agent_behavior_baselines` | **new (cloud)** — per-agent tool-distribution + drift-rate rollups for the anomaly detector (reuse of §4.5 anomaly infra) |
 
-No new transport primitive: findings stream up over the existing **`IngestTelemetry`** RPC
-(as §4.5 findings already do); auto-pause rides the **`Connect`** stream.
+No new transport primitive: findings stream up over the existing **telemetry channel**
+(as §4.5 findings already do); auto-pause rides the **control channel**.
 
 ### 12.9 New surface (mostly config + reuse)
 
@@ -1047,7 +1047,7 @@ No new transport primitive: findings stream up over the existing **`IngestTeleme
   §4.5 anomaly pipeline).
 - **[integration.md](integration.md)** — a walkthrough (drift flagged → HITL; destructive call
   blocked for lack of in-conversation authorization → approve-once); a responsibility-matrix
-  row; findings ride existing `IngestTelemetry`, auto-pause rides `Connect`.
+  row; findings ride the existing telemetry channel, auto-pause rides the control channel.
 - **[web-ui.md](web-ui.md)** — the intent-profile editor (envelope + tool blast-radius
   classifier + sensitivity), the drift timeline in Logs §4.10 / Alerts §4.13, and the
   action-scoped destructive-approval surface.

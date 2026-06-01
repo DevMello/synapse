@@ -15,7 +15,7 @@ Read the per-product details first:
 Synapse is a **control-plane / data-plane** split with a broker in the middle:
 
 ```
-   ┌──────────────┐        WSS + HTTPS        ┌──────────────────┐   gRPC (HTTP/2)    ┌──────────────────┐
+   ┌──────────────┐        WSS + HTTPS        ┌──────────────────┐    WebSocket       ┌──────────────────┐
    │   Web UI     │ ◄───────────────────────► │  Cloud Backend   │ ◄────────────────► │  TUI Daemon(s)   │
    │  (browser)   │     commands / telemetry  │   (broker +      │   commands /       │  (user machines) │
    │ CONTROL PLANE│                           │    historian)    │   telemetry        │   DATA PLANE     │
@@ -26,9 +26,9 @@ Synapse is a **control-plane / data-plane** split with a broker in the middle:
 
 **Deployment topology:** the **Web UI and Cloud Backend run on the same machine** — one
 deployment unit. A single reverse proxy on that host (or FastAPI's own static mount)
-serves the built Web UI bundle, the REST API, and the gRPC daemon hub. So the browser
-loads the app and makes its REST calls against **one origin** (no CORS), while the gRPC
-hub listens on the same host for daemon links. **Supabase** (Postgres/Auth/Storage/
+serves the built Web UI bundle, the REST API, and the WebSocket daemon hub. So the browser
+loads the app and makes its REST calls against **one origin** (no CORS), while the daemon
+hub accepts WebSocket connections on the same host. **Supabase** (Postgres/Auth/Storage/
 Realtime) remains an external managed service both the browser and the backend talk to,
 and the **daemons** are always separate (on users' own machines). Co-locating the
 frontend doesn't change the broker model: the cloud is still the only endpoint the
@@ -40,14 +40,14 @@ Three invariants define every interaction:
 2. **The cloud never executes agents or holds raw secrets.** Execution and credentials
    stay on the daemon; the cloud stores config, policy, and (pre-redacted) telemetry.
 3. **The daemon connects outbound-only.** No inbound ports on user machines; the
-   gRPC stream is always initiated from the daemon to the cloud — even cloud→daemon
-   commands ride the daemon-initiated bidirectional stream.
+   WebSocket is always initiated from the daemon to the cloud — even cloud→daemon
+   commands ride the daemon-initiated bidirectional socket.
 
 ---
 
 ## 2. Connection Establishment
 
-### Daemon ↔ Cloud (custom gRPC hub, HTTP/2)
+### Daemon ↔ Cloud (custom WebSocket hub)
 1. User installs `synapse-worker`, runs `synapse login` → **OAuth 2.0 Device
    Authorization Grant** (daemons aren't Supabase Auth users — they get their own daemon
    token). The CLI gets a `user_code` (`ABCD-1234`) + URL from `/auth/device/code`
@@ -56,12 +56,12 @@ Three invariants define every interaction:
    password is ever typed in the terminal. (Full handshake in cloud-backend.md §5.)
 2. Daemon receives a rotating refresh token + short-lived access token (stored in the OS
    keychain; `0600` encrypted-file fallback on headless boxes).
-3. Daemon opens an outbound **gRPC connection (HTTP/2)** to the **custom hub**, presenting
-   the access token as call metadata (optionally mTLS), and opens its `Connect` bidi
-   stream + `IngestTelemetry` stream, registering (name, tags, platform, version).
+3. Daemon opens an outbound **WebSocket connection** to the **custom hub**, presenting
+   the access token as a `Bearer` token (optionally mTLS), and opens its control channel
+   + telemetry channel, registering (name, tags, platform, version).
 4. Cloud marks the daemon **online**, writes a presence row (Postgres, TTL refreshed by
    heartbeat), and routes its `org:{id}:daemon:{id}` channel.
-5. Daemon heartbeats every 15s (HTTP/2 keepalive guards the transport) → cloud derives
+5. Daemon heartbeats every 15s (WebSocket ping/pong guards the transport) → cloud derives
    uptime + offline alerts.
 
 ### Browser ↔ Cloud (Supabase)
@@ -73,7 +73,7 @@ Three invariants define every interaction:
    Presence), gated by RLS; slow-changing config is read via REST / the Supabase data
    API. Live updates require no bespoke browser socket code.
 
-The browser and daemon still never talk directly — the cloud (gRPC hub + Supabase)
+The browser and daemon still never talk directly — the cloud (WebSocket hub + Supabase)
 is the only endpoint either side knows about.
 
 ---
@@ -103,12 +103,12 @@ RBAC-checks, persists, and publishes to the target daemon's channel:
 | Approve/deny HITL | write audit + decision | `hitl.resolve` |
 | Resume interrupted run | mark `recovering`, hand off checkpoint | `run.recover` |
 | Rollback to version | set `current_version` | `agent.update_prompt` |
-| Revoke a daemon | set `revoked_at`, kill refresh token | (hub closes the stream `UNAUTHENTICATED`) |
+| Revoke a daemon | set `revoked_at`, kill refresh token | (hub closes the socket, `4401`) |
 
 ### Upstream: telemetry (Daemon → Cloud → Browser)
 
-While an agent runs, the daemon streams a reasoning trace to the gRPC hub
-(`IngestTelemetry`). The cloud
+While an agent runs, the daemon streams a reasoning trace to the WebSocket hub
+(on the telemetry channel). The cloud
 persists it (Supabase Postgres for records + partitioned telemetry, Supabase Storage for
 blobs) **and** publishes it to a Supabase Realtime channel for any subscribed browser:
 
@@ -145,14 +145,14 @@ Browser (already logged in via Supabase Auth): open URL → enter ABCD-1234
 Cloud: mark authorized + bind org/user → create daemons row → next poll returns
        { access_token (~15m), refresh_token (rotating) }
    ▼
-TUI: store tokens in OS keyring (0600 file fallback) → open gRPC stream (4.1)
+TUI: store tokens in OS keyring (0600 file fallback) → open WebSocket (4.1)
    ▼
 Browser: Daemons list shows "vps-01 — online, last seen now" + a Revoke button
 
    ── later: lost VPS ──
 Browser: Daemons → vps-01 → Revoke
-   ▼  Cloud: set revoked_at, invalidate refresh token, close its gRPC stream
-      (UNAUTHENTICATED). No password change; other daemons unaffected.
+   ▼  Cloud: set revoked_at, invalidate refresh token, close its WebSocket
+      (close code 4401). No password change; other daemons unaffected.
 ```
 
 ### 4.1 Create and run an agent (one click → live)
@@ -162,14 +162,14 @@ Browser: New Agent → pick daemon "macbook-01", type=CLI (claude code)
    │  REST: agent.create (Supabase JWT)
    ▼
 Cloud:  RBAC/RLS check → write agents + agent_versions(v1) [Postgres]
-   │  gRPC hub pushes agent.deploy on Connect stream → org:acme:daemon:macbook-01
+   │  WS hub pushes agent.deploy on control channel → org:acme:daemon:macbook-01
    ▼
 Daemon: write agent def to ~/.synapse/agents/ → ack
    │
-Browser: "Run now"  ──REST: agent.run──►  Cloud (write runs row) ──gRPC Connect──►  Daemon
+Browser: "Run now"  ──REST: agent.run──►  Cloud (write runs row) ──WS control──►  Daemon
    ▼
 Daemon: render prompt → spawn `claude` subprocess → stream stdout
-   │  every chunk → Redaction Middleware → upload queue → IngestTelemetry to gRPC hub
+   │  every chunk → Redaction Middleware → upload queue → WS telemetry channel to hub
    ▼
 Cloud:  persist trace/metrics [Postgres/Storage] → publish to
         Supabase Realtime channel org:acme:agent:{id}
@@ -206,7 +206,7 @@ Daemon: RESUME run → executes the push → streams result
 GitHub push → POST /hooks/{token} (Cloud)
    ▼
 Cloud:  verify HMAC signature → map payload → create runs row → agent.run
-   ▼  gRPC Connect stream → target daemon
+   ▼  WS control channel → target daemon
 Daemon: executes → telemetry flows back exactly as in 4.1
 ```
 
@@ -244,7 +244,7 @@ Browser: encrypt value client-side (libsodium sealed box) → ciphertext
    ▼  REST: env.set { name, ciphertext }   (Supabase JWT, RBAC checked)
 Cloud:  write env_var_refs(name, scope, origin=ui)  ← NAME ONLY, no value
         relay ciphertext to daemon via hub  ← ciphertext NOT persisted
-   ▼  gRPC Connect stream → org:acme:daemon:macbook-01
+   ▼  WS control channel → org:acme:daemon:macbook-01
 Daemon: decrypt with private key (in OS keychain) → store value in OS keyring
         register value with Redaction Middleware → ack (name only)
    ▼
@@ -269,10 +269,10 @@ Browser: Daemon "macbook-01" → Capabilities → "browser-use" → Enable
    ▼  REST: plugin.install { plugin: browser-use@1.4.0, daemon: macbook-01 }
 Cloud:  RBAC check → verify platform compat → write daemon_capabilities(status=installing)
         send manifest + checksum → publish plugin.install over hub
-   ▼  gRPC Connect stream → org:acme:daemon:macbook-01
+   ▼  WS control channel → org:acme:daemon:macbook-01
 Daemon: verify checksum → create isolated venv → install deps → playwright install
         register `browser` MCP server + tools → stream status: installing → ready (+ tool list)
-   ▼  status/capabilities flow up via IngestTelemetry → Supabase Realtime
+   ▼  status/capabilities flow up via the telemetry channel → Supabase Realtime
 Browser: capability shows "ready on macbook-01" — available, but NOT yet usable by any agent
 
 ─ TIER 2: select for an agent (per agent, no re-install) ─
@@ -350,7 +350,7 @@ guarantees no raw secret reaches the snapshot.
 |---------|:------:|:-------------:|:----------:|
 | User-facing control | ● | | |
 | Auth / identity / RBAC | requests | **enforces** | presents token |
-| Real-time routing | subscribes (Supabase Realtime) | **brokers (gRPC hub + Supabase Realtime)** | streams (gRPC over HTTP/2) |
+| Real-time routing | subscribes (Supabase Realtime) | **brokers (WebSocket hub + Supabase Realtime)** | streams (WebSocket) |
 | Agent execution | | | **runs** |
 | Provider API keys / secrets | never | never | **keychain only** |
 | Agent env-var values | encrypts (write-only) | relays ciphertext, name only | **decrypts → keyring → injects** |
@@ -390,13 +390,13 @@ guarantees no raw secret reaches the snapshot.
   never re-running expensive or non-idempotent work. Checkpoints sync to the cloud
   **E2E-encrypted** (org recovery key) so a run survives total local loss and can resume
   on another daemon, while the cloud still can't read the state.
-- **Resilience:** outbound-only daemon gRPC streams (HTTP/2 keepalive) with
-  exponential-backoff reconnect; stateless gRPC hub (presence/routing state in Postgres)
-  so any node serves any daemon stream; browsers auto-resubscribe to Supabase Realtime
+- **Resilience:** outbound-only daemon WebSocket connections (ping/pong keepalive) with
+  exponential-backoff reconnect; stateless WebSocket hub (presence/routing state in Postgres)
+  so any node serves any daemon socket; browsers auto-resubscribe to Supabase Realtime
   on reconnect.
-- **Wire efficiency:** Protocol Buffers on the daemon↔hub gRPC link (compact, typed,
-  HTTP/2-multiplexed), JSON on the
-  Supabase↔browser link (debuggability, native to `supabase-js`).
+- **Wire format:** JSON on the daemon↔hub WebSocket link (debuggable, schema-validated)
+  and on the
+  Supabase↔browser link (native to `supabase-js`).
 - **Auditability everywhere:** every command (who clicked what) and every agent
   decision (what it did and why) lands in the immutable, optionally hash-chained audit
   log — a complete chain from human intent → cloud routing → on-machine action.
@@ -407,7 +407,7 @@ guarantees no raw secret reaches the snapshot.
 
 A user opens the **Web UI**, clicks once to deploy an agent onto a chosen **TUI
 Daemon** running on their own machine. The click travels as a command to the **Cloud
-Backend**, which authenticates it, records it, and routes it over a gRPC stream (HTTP/2)
+Backend**, which authenticates it, records it, and routes it over a WebSocket
 to the daemon. The daemon executes the agent locally — calling APIs or CLI tools, enforcing
 rulesets, redacting secrets, and pausing for human approval when needed — while
 streaming a fully-redacted reasoning trace back through the cloud to the browser in

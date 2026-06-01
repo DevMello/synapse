@@ -1,6 +1,6 @@
 # Synapse — Cloud Backend
 
-> The control plane and nervous system. A stateless REST API + gRPC daemon hub that
+> The control plane and nervous system. A stateless REST API + WebSocket daemon hub that
 > brokers every message between the browser (Web UI) and the worker daemons (TUI),
 > persists all telemetry, runs the analytics/anomaly engine, fans out notifications,
 > and powers the marketplaces.
@@ -17,7 +17,7 @@ Its responsibilities:
 
 1. **Identity & tenancy** — users, organizations, teams, roles, and the daemons/agents
    they own.
-2. **Real-time brokering** — a gRPC daemon hub (HTTP/2) that routes commands
+2. **Real-time brokering** — a WebSocket daemon hub that routes commands
    (browser → daemon) and telemetry (daemon → browser) with sub-second latency.
 3. **Persistence** — the system of record for agent definitions, prompt versions, run
    history, logs, tool calls, costs, and audit trails.
@@ -40,8 +40,8 @@ Its responsibilities:
 
 ```
                        ┌────── Cloud Backend host (single machine) ──────┐
-   Daemons  ──gRPC──►   │  ┌────────────┐ ┌──────────┐ ┌──────────────┐  │
-   (TUI)    (HTTP/2)    │  │ Web UI     │ │ REST API │ │  gRPC Daemon │  │
+   Daemons  ──WebSkt─►   │  ┌────────────┐ ┌──────────┐ ┌──────────────┐  │
+   (TUI)    (WSS)       │  │ Web UI     │ │ REST API │ │  WS Daemon   │  │
                        │  │ static     │ │ (FastAPI)│ │  Hub (device │  │
                        │  │ bundle     │ │          │ │  auth, HITL) │  │
                        │  └─────┬──────┘ └────┬─────┘ └──────┬───────┘  │
@@ -68,13 +68,13 @@ Its responsibilities:
 
 > **Co-location note:** the **Web UI and the Cloud Backend run on the same host** — one
 > deployment unit. A single reverse proxy on that machine (or FastAPI's static mount)
-> serves the built Web UI bundle, the REST API, and the gRPC daemon hub, so the browser
-> loads the app and calls REST on **one origin (no CORS)**. The gRPC hub listens on the
-> same host for daemon links. Supabase and the daemons stay separate.
+> serves the built Web UI bundle, the REST API, and the WebSocket daemon hub, so the browser
+> loads the app and calls REST on **one origin (no CORS)**. The WebSocket hub accepts
+> connections on the same host for daemon links. Supabase and the daemons stay separate.
 >
 > **Stack note:** Supabase consolidates Postgres (records + audit + telemetry),
 > Auth (browser/user identity), Storage (blobs), and Realtime (browser fan-out) into
-> one managed service. A **thin custom gRPC hub** (served by grpc.aio alongside FastAPI)
+> one managed service. A **thin custom WebSocket hub** (FastAPI WebSocket routes)
 > is kept *only* for the daemon control link, which needs device-token auth and strict
 > at-least-once delivery for commands/HITL that Supabase Realtime isn't shaped for.
 > **ClickHouse is dropped
@@ -88,30 +88,31 @@ Its responsibilities:
 Synapse splits the real-time layer in two, because the daemon link and the browser link
 have very different requirements:
 
-### 3.1 Daemon link — custom gRPC hub (HTTP/2)
+### 3.1 Daemon link — custom WebSocket hub
 
-- **gRPC service `DaemonLink`** (grpc.aio), one long-lived stream per worker,
-  authenticated with a daemon device-token in call metadata (issued by our own
-  device-code flow, *not* Supabase Auth; optionally pinned with mTLS client certs).
-- **Two RPCs** per daemon, multiplexed over its single HTTP/2 connection:
-  - `Connect(stream DaemonMessage) → stream CloudMessage` — **bidirectional**; the cloud
-    pushes commands/HITL resolutions down this stream, the daemon pushes HITL requests
-    and `run.reconcile` up. The **daemon always initiates** it, so the cloud reaches the
-    daemon without any inbound port on the user's machine.
-  - `IngestTelemetry(stream TelemetryFrame) → TelemetryAck` — **client-streaming** for
-    the high-volume trace/metric firehose, on its own HTTP/2 stream so telemetry can't
-    head-of-line-block control or HITL.
+- **WebSocket hub** (FastAPI WebSocket routes), one long-lived connection per worker,
+  authenticated with a daemon device-token presented as a `Bearer` token on connect
+  (issued by our own device-code flow, *not* Supabase Auth; optionally pinned with mTLS
+  client certs).
+- **Two channels** per daemon:
+  - `/ws/daemon` — **bidirectional** control channel; the cloud pushes commands/HITL
+    resolutions down this socket (as `CloudMessage` JSON), the daemon pushes HITL
+    requests and `run.reconcile` up (as `DaemonMessage` JSON). The **daemon always
+    initiates** it, so the cloud reaches the daemon without any inbound port on the
+    user's machine.
+  - `/ws/daemon/telemetry` — a separate socket for the high-volume trace/metric
+    firehose, so telemetry can't head-of-line-block control or HITL.
 - This is a **thin custom service** because daemon control needs guarantees Supabase
   Realtime isn't built for: strict at-least-once delivery + idempotency for commands
-  and HITL resolutions (carried as app-level sequence numbers + acks in the proto, since
-  gRPC won't redeliver across a reconnect), device-token auth, and backpressure control
-  (HTTP/2 flow control + explicit acks).
+  and HITL resolutions (carried as app-level sequence numbers + acks in the JSON
+  envelope, since a WebSocket won't redeliver across a reconnect), device-token auth,
+  and backpressure control (explicit acks + bounded send queues).
 - The hub stays **stateless** — routing/presence state lives in **Supabase Postgres**
   (presence rows with TTL via a heartbeat) or a small Redis instance if pub/sub fan-out
-  between hub nodes is needed at scale. Any node can serve any daemon stream; a command
-  for a daemon is routed to whichever node currently holds its `Connect` stream.
-- **Wire format**: Protocol Buffers (the `.proto` is the contract; compact, strongly
-  typed, code-generated for both daemon and cloud).
+  between hub nodes is needed at scale. Any node can serve any daemon socket; a command
+  for a daemon is routed to whichever node currently holds its control channel.
+- **Wire format**: JSON (the message schema is the contract; debuggable and
+  schema-validated for both daemon and cloud).
 
 ### 3.2 Browser link — Supabase Realtime
 
@@ -128,14 +129,14 @@ have very different requirements:
 ```
 Browser clicks "Run agent"
   → REST/Realtime to backend  → validate auth/RBAC  → write run row (Postgres)
-  → gRPC hub pushes cmd to the target daemon's Connect stream  → daemon executes
-  → daemon streams telemetry frames (IngestTelemetry) → hub → persists (Postgres/Storage)
+  → WS hub pushes cmd to the target daemon's control channel  → daemon executes
+  → daemon streams telemetry frames (telemetry channel) → hub → persists (Postgres/Storage)
     + publishes to Supabase Realtime channel org:{id}:agent:{id}
   → browser (subscribed via supabase-js) renders live trace
 ```
 
 - **Delivery guarantees**: daemon-bound control + HITL messages are at-least-once with
-  idempotency keys (app-level acks over the gRPC stream); high-volume browser telemetry is best-effort live but
+  idempotency keys (app-level acks over the WebSocket); high-volume browser telemetry is best-effort live but
   durably persisted — the authoritative copy is always in Postgres/Storage, the live
   stream is a convenience.
 
@@ -221,8 +222,8 @@ org's rows — even through the auto-generated Supabase data APIs.
 - **REST (FastAPI)** for custom CRUD/business logic: agent deploy, marketplace install,
   analytics queries, webhook processing. Simple table reads/writes can also use
   Supabase's auto-generated data API (PostgREST) directly from the browser, gated by RLS.
-- **Custom daemon gRPC service** (`DaemonLink` over HTTP/2) for the daemon control link
-  (commands, telemetry, HITL).
+- **Custom daemon WebSocket hub** (`/ws/daemon` + `/ws/daemon/telemetry`) for the daemon
+  control link (commands, telemetry, HITL).
 - **Supabase Realtime** for browser-facing live updates.
 - **Agent memory**: read the redacted snapshot via the RLS data API; edits/pre-loads go
   through REST (`/agents/{id}/memory`) which writes `agent_memory` and emits a
@@ -240,9 +241,9 @@ org's rows — even through the auto-generated Supabase data APIs.
   by the FastAPI layer.
 - **Daemons → custom OAuth 2.0 device-code flow** (FastAPI): the daemon is not a human
   user, so it gets its own long-lived refresh token + short-lived access token, scoped
-  to a single daemon. This token is presented as gRPC call metadata (validated by a
-  server interceptor) to authenticate the daemon stream, and is what RLS checks for
-  daemon-originated writes.
+  to a single daemon. This token is presented as a `Bearer` token on the WebSocket
+  handshake (validated by the hub's auth dependency) to authenticate the daemon
+  connection, and is what RLS checks for daemon-originated writes.
 
 #### Daemon login — OAuth 2.0 Device Authorization Grant (RFC 8628)
 
@@ -297,8 +298,8 @@ infeasible within the TTL.
 **Revocation** — the cloud keeps the issued refresh token (hashed) tied to the daemon.
 A **Revoke** action in the Web UI (or losing a device) sets the daemon `revoked_at`,
 **invalidates the refresh token** (so it can never mint a new access token) and **tears
-down the daemon's live gRPC stream immediately** (the hub closes `Connect` with
-`UNAUTHENTICATED`). The short-lived access token expires on its own within minutes;
+down the daemon's live WebSocket immediately** (the hub closes the control channel with
+close code `4401`). The short-lived access token expires on its own within minutes;
 revocation needs **no change to the user's primary password** and affects only that one
 device.
 
@@ -470,14 +471,14 @@ The cloud brokers agent env vars **without ever being able to read their values*
 
 ## 12. Scaling, Reliability, Security
 
-- **Stateless API + gRPC hub** → scale out horizontally; presence/routing state in
+- **Stateless API + WebSocket hub** → scale out horizontally; presence/routing state in
   Postgres (or a small Redis if cross-node pub/sub fan-out is needed at scale). Each
-  daemon's long-lived stream is pinned to one node, so an L4/HTTP-2-aware load balancer
-  (or Redis-backed routing) directs a daemon-bound command to the node holding its stream.
+  daemon's long-lived socket is pinned to one node, so a WebSocket-aware load balancer
+  (or Redis-backed routing) directs a daemon-bound command to the node holding its socket.
 - **Co-located frontend**: the Web UI is a static bundle, so it ships with each backend
   node (served by the same reverse proxy / static mount) and replicates for free — it
   adds no state and doesn't constrain horizontal scaling. Start as a single host;
-  add nodes behind the LB when REST/gRPC load grows.
+  add nodes behind the LB when REST/WebSocket load grows.
 - **Async workers (Celery/Arq)** for analytics rollups, anomaly scans, notification
   fan-out, and webhook processing — decoupled from request latency.
 - **Storage tiering (all Supabase)**: Postgres (records/audit + partitioned telemetry +
@@ -489,10 +490,10 @@ The cloud brokers agent env vars **without ever being able to read their values*
   API keys; telemetry arrives pre-redacted from the daemon. **Env-var values are
   E2E-encrypted to the daemon** — the cloud relays opaque ciphertext and stores only
   variable *names* (§10.5).
-- **Transport**: TLS everywhere (gRPC over HTTP/2 for the daemon link, optionally mTLS;
-  HTTPS/WSS for the browser); daemon (device-token in call metadata) and browser
+- **Transport**: TLS everywhere (WSS for the daemon link, optionally mTLS;
+  HTTPS/WSS for the browser); daemon (device-token `Bearer` on the handshake) and browser
   (Supabase JWT) independently authenticated; RBAC enforced on every command and HITL
-  resolution via a gRPC server interceptor.
+  resolution via the hub's auth dependency.
 - **Cost control**: batch/downsample telemetry writes; Supabase self-hosts if vendor
   lock-in or per-row write cost becomes a concern at scale.
 
@@ -561,13 +562,13 @@ never the source of truth (the daemon's local provider is). Flow:
 | Telemetry DB | **Supabase Postgres**, partitioned (TimescaleDB optional); ClickHouse only at scale |
 | Blob storage | **Supabase Storage** (S3-backed) |
 | Browser realtime | **Supabase Realtime** (Broadcast + Presence) |
-| Daemon realtime | Custom gRPC hub over HTTP/2 (grpc.aio, Protocol Buffers) |
+| Daemon realtime | Custom WebSocket hub (FastAPI WebSocket routes, JSON) |
 | User/browser auth | **Supabase Auth** (GoTrue) |
 | Daemon auth | Custom OAuth 2.0 device-code flow, JWT |
 | Async jobs | Celery / Arq |
 | Optional cache/pub-sub | Redis (only if needed for hub fan-out) |
 | Notifications | Slack/Discord SDKs, SES/Postmark (or Supabase Edge Functions) |
-| Wire format | Protocol Buffers (daemon gRPC) / JSON (browser) |
+| Wire format | JSON (daemon WebSocket) / JSON (browser) |
 
 See **[integration.md](integration.md)** for the end-to-end message flows that tie the
 cloud to the daemon and Web UI.

@@ -2,7 +2,7 @@
 
 > The agent that lives on the user's machine. A Python package the user installs,
 > running as a persistent daemon that executes agents, redacts secrets, and bridges
-> the local environment to the Synapse cloud over a gRPC stream (HTTP/2).
+> the local environment to the Synapse cloud over a WebSocket connection.
 
 ---
 
@@ -17,7 +17,7 @@ user's own credentials.
 It serves three jobs:
 
 1. **Connection** — establish and maintain a secure, authenticated, bidirectional
-   **gRPC stream (HTTP/2)** to the Cloud Backend so the browser can drive it in real time.
+   **WebSocket connection** to the Cloud Backend so the browser can drive it in real time.
 2. **Execution** — run agents (API-based LLM agents *and* CLI tools like `claude`,
    `aider`, `gemini`, shell scripts) inside isolated, monitored processes on a
    schedule, webhook, or manual trigger.
@@ -118,7 +118,7 @@ auto-restarts on crash and on boot, and reconnects to the cloud automatically.
 │  ┌────────────────┐   ┌──────────────────┐   ┌────────────────────┐  │
 │  │  Connection     │   │   Control Loop   │   │   Textual TUI      │  │
 │  │  Manager        │◄─►│   (asyncio core) │◄─►│   (optional front) │  │
-│  │  - gRPC client  │   │   - dispatcher   │   └────────────────────┘  │
+│  │  - WS client    │   │   - dispatcher   │   └────────────────────┘  │
 │  │  - reconnect    │   │   - heartbeat    │                           │
 │  │  - auth refresh │   │   - cmd router   │                           │
 │  └────────────────┘   └────────┬─────────┘                           │
@@ -155,38 +155,42 @@ auto-restarts on crash and on boot, and reconnects to the cloud automatically.
 
 ### 4.1 Connection Manager
 
-- Maintains a single outbound **gRPC connection (HTTP/2)** to the Cloud Backend, opened
-  with `grpcio` (grpc.aio async client). Two RPCs multiplex over the one connection:
-  - **`Connect(stream DaemonMessage) → stream CloudMessage`** — a long-lived
-    **bidirectional-streaming** RPC carrying control + HITL both ways. The daemon (the
-    client) always initiates it, so no inbound port is ever opened.
-  - **`IngestTelemetry(stream TelemetryFrame) → TelemetryAck`** — a separate
-    **client-streaming** RPC for the high-volume trace/metric firehose, on its own HTTP/2
-    stream so a flood of trace chunks can't head-of-line-block control or HITL messages.
-- **Liveness**: HTTP/2 **keepalive PINGs** (grpc keepalive params) detect a dead
-  transport; an app-level heartbeat message every 15s drives cloud presence/uptime.
-- **Reconnect**: exponential backoff with jitter (1s → 60s cap); a dropped stream is
-  re-opened and both RPCs re-established.
-- **Auth**: presents the daemon access token as gRPC call **metadata**
-  (`authorization: Bearer …`) when opening each stream; transparently refreshes via the
-  refresh token on an `UNAUTHENTICATED` status and re-opens. Optionally pinned with
-  **mTLS** (daemon client cert) since the daemon has a stable identity.
+- Maintains outbound **WebSocket connections** to the Cloud Backend, opened with the
+  `websockets` client (over WSS). Two channels keep the high-volume firehose off the
+  control path:
+  - **Control channel** (`/ws/daemon`) — a long-lived **bidirectional** WebSocket
+    carrying control + HITL both ways. The daemon always initiates it, so no inbound
+    port is ever opened. Inbound frames are `CloudMessage` JSON, outbound are
+    `DaemonMessage` JSON.
+  - **Telemetry channel** (`/ws/daemon/telemetry`) — a separate WebSocket for the
+    high-volume trace/metric firehose, so a flood of trace chunks can't
+    head-of-line-block control or HITL messages on the control channel.
+- **Liveness**: WebSocket **ping/pong** frames detect a dead transport; an app-level
+  heartbeat message every 15s drives cloud presence/uptime.
+- **Reconnect**: exponential backoff with jitter (1s → 60s cap); a dropped socket is
+  re-opened and both channels re-established.
+- **Auth**: presents the daemon access token as a **`Bearer` token** when opening each
+  socket (`Authorization` header, or a `?token=` query param where header injection
+  isn't available); transparently refreshes via the refresh token on a `4401` close
+  code and re-opens. Optionally pinned with **mTLS** (daemon client cert) since the
+  daemon has a stable identity.
 - **Offline buffering**: while disconnected, all telemetry (logs, metrics, run results)
   is durably queued in the local SQLite WAL store and **replayed in order** on
-  reconnect with at-least-once delivery (idempotency keys dedupe server-side). gRPC gives
-  ordered delivery *within* a stream but no redelivery across reconnects, so these
-  app-level sequence numbers + acks remain the source of truth — not the transport.
+  reconnect with at-least-once delivery (idempotency keys dedupe server-side). A
+  WebSocket gives ordered delivery *within* a connection but no redelivery across
+  reconnects, so these app-level sequence numbers + acks remain the source of truth —
+  not the transport.
 - **Reconnect reconciliation**: on every reconnect the daemon sends a `run.reconcile`
-  message (on the `Connect` stream) listing its in-flight/finished runs and their latest
+  message (on the control channel) listing its in-flight/finished runs and their latest
   checkpoint sequence numbers, so the cloud and daemon agree on state and any work done
   offline is uploaded (see [§4.12](#412-checkpointing-resume--recovery)).
-- All messages are **Protocol Buffers** (the `.proto` schema is the wire contract);
-  large log blobs are chunked across `TelemetryFrame`s.
+- All messages are **JSON** (the message schema is the wire contract); large log blobs
+  are chunked across telemetry frames.
 
 ### 4.2 Control Loop / Command Router
 
-Receives commands from the cloud as `CloudMessage`s on the `Connect` stream and routes
-them (each `CloudMessage` carries a oneof command payload + an idempotency key):
+Receives commands from the cloud as `CloudMessage`s on the control channel and routes
+them (each `CloudMessage` carries a typed command payload + an idempotency key):
 
 | Command | Action |
 |---------|--------|
@@ -734,10 +738,10 @@ already sanitized. Sensitive raw values belong in the env-var vault, never in me
   compromised terminal yields only a **short-lived, revocable access token** — not the
   user's primary credentials. Each daemon session is **independently revocable** from the
   Web UI without a password change (cloud invalidates the refresh token + drops the
-  stream), so a lost laptop/VPS is contained instantly.
-- Outbound-only gRPC/HTTP-2 connection — the daemon (the gRPC client) **never opens an
+  socket), so a lost laptop/VPS is contained instantly.
+- Outbound-only WebSocket connection — the daemon (the WS client) **never opens an
   inbound port**, so no firewall changes and no attack surface from the public internet.
-  Even the server→daemon command stream rides the daemon-initiated bidirectional RPC.
+  Even the server→daemon command path rides the daemon-initiated bidirectional socket.
 - Redaction + rulesets enforced locally; the cloud cannot exfiltrate raw secrets even
   if compromised, because they are masked before transmission.
 - **Env vars are E2E-encrypted**: the daemon's X25519 private key never leaves the
@@ -765,8 +769,8 @@ already sanitized. Sensitive raw values belong in the env-var vault, never in me
 | Async core | `asyncio` |
 | TUI | Textual |
 | CLI | Typer / Click |
-| Transport / RPC | gRPC over HTTP/2 (`grpcio`, grpc.aio async client) |
-| Wire format | Protocol Buffers (`grpcio-tools` codegen) |
+| Transport | WebSocket over WSS (`websockets` async client) |
+| Wire format | JSON |
 | Scheduler | APScheduler |
 | Local store | SQLite (WAL) |
 | Agent memory | SQLite (default) · Chroma/Qdrant in Docker (vector provider) |
