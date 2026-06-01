@@ -26,12 +26,47 @@ import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 
+from supabase import acreate_client  # noqa: E402
+from supabase.lib.client_options import AsyncClientOptions  # noqa: E402
+
 from synapse_cloud.app import create_app  # noqa: E402
 from synapse_cloud.config import get_settings  # noqa: E402
-from synapse_cloud.db import service_db  # noqa: E402
+from synapse_cloud.db import reset_db_cache, service_db  # noqa: E402
 from synapse_cloud.security import encode_daemon_access_token  # noqa: E402
 
 _PASSWORD = "Test-Passw0rd!"
+
+
+async def _sign_in_access_token(email: str, password: str) -> str:
+    """Sign in on a throwaway anon client to obtain a user access token.
+
+    We must NOT sign in on the shared service-role client and then sign out:
+    GoTrue's logout revokes the session server-side, which would invalidate the
+    very access token we just handed back to the test. Using a disposable anon
+    client keeps the service client's session untouched and the token valid.
+    """
+    s = get_settings()
+    anon = await acreate_client(
+        s.supabase_url,
+        s.supabase_anon_key,
+        options=AsyncClientOptions(auto_refresh_token=False, persist_session=False),
+    )
+    signin = await anon.auth.sign_in_with_password({"email": email, "password": password})
+    return signin.session.access_token
+
+
+@pytest.fixture(autouse=True)
+def _reset_db_cache_each_test():
+    """Drop the cached async Supabase client around every test.
+
+    The client is created lazily and cached module-wide; on some event-loop
+    policies (e.g. Windows ProactorEventLoop) a client bound to one test's loop
+    breaks when reused by the next. Resetting per test rebinds it to the active
+    loop.
+    """
+    reset_db_cache()
+    yield
+    reset_db_cache()
 
 
 def _require_real_supabase() -> None:
@@ -105,12 +140,7 @@ async def make_test_org() -> Callable[..., Awaitable[TestOrg]]:
             {"org_id": org_id, "user_id": user_id, "role": role}
         ).execute()
 
-        signin = await db.auth.sign_in_with_password(
-            {"email": email, "password": _PASSWORD}
-        )
-        access_token = signin.session.access_token
-        # Don't let the service client adopt the just-signed-in session.
-        await db.auth.sign_out()
+        access_token = await _sign_in_access_token(email, _PASSWORD)
 
         return TestOrg(
             org_id=org_id,
