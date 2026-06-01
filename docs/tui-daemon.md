@@ -269,6 +269,17 @@ endpoint = "stdio:///usr/local/bin/github-mcp"
   enforces timeouts, and captures exit codes.
 - Runs in a sandboxed working dir with a scrubbed environment (only whitelisted env
   vars + injected secrets from the keychain).
+- **Token & cost accounting via `ccusage`.** Unlike the API Adapter, a CLI tool doesn't
+  hand structured usage back to the wrapping process — but **many agent CLIs** (Claude
+  Code, OpenAI Codex, Gemini CLI, and others) write **local usage logs**. The adapter reads
+  them on-device with the **`ccusage`** package — which supports a growing range of these
+  tools — to derive per-run **token usage** (input / output / cache-create / cache-read) and
+  **cost**, normalized into the **same usage shape the API Adapter emits**. This keeps
+  cost-per-run, `max_cost_usd` caps (§4.6), and checkpoint accounting (§4.12) uniform across
+  API and CLI agents. Parsing is **local** (consistent with the on-device guarantee); the
+  cloud price table still governs normalization. CLI tools `ccusage` doesn't cover fall back
+  to structured-JSON output if present, else cost is reported as **unavailable/estimated**
+  rather than wrong.
 
 ### 4.4 Scheduler
 
@@ -759,6 +770,7 @@ already sanitized. Sensitive raw values belong in the env-var vault, never in me
 | Scheduler | APScheduler |
 | Local store | SQLite (WAL) |
 | Agent memory | SQLite (default) · Chroma/Qdrant in Docker (vector provider) |
+| CLI token/cost accounting | `ccusage` (parses many agent-CLI usage logs on-device) |
 | PII detection | regex + entropy + optional Presidio |
 | Service mgmt | systemd / launchd / Windows Service |
 | Secret / env-var storage | OS keychain (`keyring`) |
