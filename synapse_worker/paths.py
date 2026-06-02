@@ -90,8 +90,10 @@ def secure_write(path: Path, data: bytes | str) -> None:
     restrict_dir(path.parent)
     if isinstance(data, str):
         data = data.encode("utf-8")
-    # Open with 0600 from the start so there's no readable window.
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    # Open with 0600 from the start so there's no readable window. O_BINARY on
+    # Windows prevents \n -> \r\n translation that would corrupt binary payloads
+    # (e.g. sealed ciphertext / keys); it's absent (0) on POSIX.
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0)
     mode = stat.S_IRUSR | stat.S_IWUSR
     fd = os.open(path, flags, mode)
     try:

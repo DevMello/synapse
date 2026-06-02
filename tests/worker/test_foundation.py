@@ -171,6 +171,19 @@ max_cost_usd = 2.0
     assert m.max_cost_usd == 2.0
 
 
+def test_secure_write_preserves_binary(settings):
+    # Regression: secure_write must not translate bytes (no \n -> \r\n on Windows),
+    # or sealed ciphertext / keys round-trip corrupt.
+    from synapse_worker.paths import paths_for, secure_write
+
+    paths = paths_for(settings)
+    paths.ensure_layout()
+    blob = bytes(range(256)) + b"\n\r\n\x00line"
+    target = paths.keys_dir / "binblob.bin"
+    secure_write(target, blob)
+    assert target.read_bytes() == blob
+
+
 def test_usage_add():
     a = Usage(input_tokens=10, output_tokens=5, cost_usd=0.01)
     b = Usage(input_tokens=3, output_tokens=2, cost_usd=0.02, estimated=True)
