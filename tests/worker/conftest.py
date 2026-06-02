@@ -24,6 +24,7 @@ from synapse_worker.filtering import base as _filtering
 from synapse_worker.plugins import base as _plugins
 from synapse_worker.router import clear_handlers
 from synapse_worker.ruleset import base as _ruleset
+from synapse_worker.services import clear_services
 from synapse_worker.store import LocalStore, reset_store, set_store
 from synapse_worker.uplink import get_uplink, reset_uplink
 
@@ -44,12 +45,14 @@ def _isolate(tmp_path, monkeypatch):
     _caps.reset_capability_registry()
     _plugins.reset_plugin_registry()
     clear_handlers()
+    clear_services()
     yield
     _config.reset_settings_cache()
     reset_store()
     reset_uplink()
     reset_keystore()
     clear_handlers()
+    clear_services()
 
 
 @pytest.fixture

@@ -23,6 +23,7 @@ from . import commands as _commands_pkg
 from .config import Settings, get_settings
 from .logging import configure_logging, get_logger
 from .paths import WorkerPaths, paths_for
+from .services import service_factories
 from .store import LocalStore, set_store
 
 log = get_logger(__name__)
@@ -82,19 +83,35 @@ async def run_daemon(settings: Optional[Settings] = None) -> None:
     await daemon.store.connect()
     log.info("synapse-worker started (home=%s)", daemon.paths.home)
 
+    # Instantiate every registered long-running service (connection, scheduler,
+    # heartbeat, ...) now that the store is open, and gather their run loops.
     runners = []
-    connection = daemon.services.get("connection")
-    if connection is not None and hasattr(connection, "run"):
-        runners.append(connection.run())
+    for name, factory in service_factories().items():
+        try:
+            svc = factory(daemon)
+        except Exception:  # noqa: BLE001 - a broken service shouldn't sink the daemon
+            log.exception("failed to construct service %s", name)
+            continue
+        daemon.register_service(name, svc)
+        run = getattr(svc, "run", None)
+        if callable(run):
+            runners.append(run())
 
     try:
         if runners:
             await asyncio.gather(*runners)
         else:
-            # No connection unit installed: idle until cancelled.
+            # No service units installed: idle until cancelled.
             await asyncio.Event().wait()
     except asyncio.CancelledError:  # pragma: no cover - shutdown path
         log.info("synapse-worker shutting down")
         raise
     finally:
+        for svc in daemon.services.values():
+            stop = getattr(svc, "stop", None)
+            if callable(stop):
+                try:
+                    await stop()
+                except Exception:  # noqa: BLE001
+                    log.exception("service stop failed")
         await daemon.store.close()
