@@ -11,6 +11,12 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from synapse_cloud.db import service_db
+from synapse_cloud.message_registry import MessageContext, dispatch
+from synapse_cloud.routers.daemons import DAEMON_REGISTER
+
+
+def _reg_ctx(daemon_id: str, org_id: str) -> MessageContext:
+    return MessageContext(daemon_id=daemon_id, org_id=org_id)
 
 
 def _iso(dt: datetime) -> str:
@@ -193,3 +199,70 @@ async def test_patch_requires_write_role(client, make_test_org):
         json={"name": "nope"},
     )
     assert resp.status_code == 403
+
+
+# ── Inbound daemon.register (§2.3 self-registration on connect) ───────────────
+async def test_register_updates_identity(test_org):
+    daemon_id, _ = await test_org.make_daemon(name="before")
+    n = await dispatch(
+        DAEMON_REGISTER,
+        _reg_ctx(daemon_id, test_org.org_id),
+        {
+            "name": "macbook-01",
+            "tags": ["gpu", "us-east"],
+            "platform": "darwin-arm64",
+            "version": "0.2.0",
+        },
+    )
+    assert n >= 1
+    db = await service_db()
+    row = (
+        await db.table("daemons")
+        .select("name, tags, platform, version")
+        .eq("org_id", test_org.org_id)
+        .eq("id", daemon_id)
+        .execute()
+    ).data[0]
+    assert row["name"] == "macbook-01"
+    assert row["tags"] == ["gpu", "us-east"]
+    assert row["platform"] == "darwin-arm64"
+    assert row["version"] == "0.2.0"
+
+
+async def test_register_partial_frame_does_not_blank_fields(test_org):
+    daemon_id, _ = await test_org.make_daemon(name="keep-me")
+    # Only a version bump (e.g. after a self-update) — name must NOT be cleared.
+    await dispatch(
+        DAEMON_REGISTER, _reg_ctx(daemon_id, test_org.org_id), {"version": "9.9.9"}
+    )
+    db = await service_db()
+    row = (
+        await db.table("daemons")
+        .select("name, version")
+        .eq("org_id", test_org.org_id)
+        .eq("id", daemon_id)
+        .execute()
+    ).data[0]
+    assert row["name"] == "keep-me"
+    assert row["version"] == "9.9.9"
+
+
+async def test_register_is_org_scoped(make_test_org):
+    org_a = await make_test_org()
+    org_b = await make_test_org()
+    daemon_id, _ = await org_a.make_daemon(name="a-daemon")
+    # A frame carrying org_b's id must not touch org_a's daemon row.
+    await dispatch(
+        DAEMON_REGISTER,
+        _reg_ctx(daemon_id, org_b.org_id),
+        {"name": "hijacked"},
+    )
+    db = await service_db()
+    row = (
+        await db.table("daemons")
+        .select("name")
+        .eq("org_id", org_a.org_id)
+        .eq("id", daemon_id)
+        .execute()
+    ).data[0]
+    assert row["name"] == "a-daemon"

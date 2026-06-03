@@ -39,6 +39,7 @@ class MockCloud:
         self.heartbeats: int = 0
         self.connect_count: int = 0
         self.reject_next: bool = False                 # close next socket with 4401
+        self.reject_all: bool = False                  # close EVERY socket with 4401
         self.last_token: Optional[str] = None
         self._server: Any = None
         self._seq: int = 0
@@ -67,7 +68,7 @@ class MockCloud:
             )
         except Exception:  # noqa: BLE001
             self.last_token = None
-        if self.reject_next:
+        if self.reject_all or self.reject_next:
             self.reject_next = False
             await ws.close(code=4401)
             return

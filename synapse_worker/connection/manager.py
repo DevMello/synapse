@@ -118,10 +118,18 @@ class ConnectionManager:
             except asyncio.CancelledError:
                 raise
             except _TokenExpired:
-                # 4401: refresh the token, then reconnect immediately (no backoff —
-                # this is an expected, recoverable handshake-auth condition).
-                await self._handle_token_expiry()
-                continue
+                # 4401: the cloud says our access token is stale. Try to refresh it.
+                if await self._handle_token_expiry():
+                    # Got a fresh token — reconnect immediately and reset backoff
+                    # (an expected, recoverable handshake-auth condition).
+                    backoff = _BACKOFF_START
+                    continue
+                # Refresh FAILED (the daemon was revoked, so its refresh token is dead,
+                # or the token endpoint is unreachable). Do NOT `continue` — that would
+                # hot-loop the handshake with the same dead token, pinning a CPU and
+                # hammering the cloud. Fall through to the normal backoff instead so a
+                # revoked daemon retries only at the capped interval.
+                log.debug("%s channel: token refresh failed; backing off", channel)
             except Exception:  # noqa: BLE001 - any connect/serve error -> backoff+retry
                 log.debug("%s channel error; reconnecting", channel, exc_info=True)
             if self._stopping.is_set():
@@ -191,14 +199,25 @@ class ConnectionManager:
                     kwargs["extra_headers"] = header
             except Exception:  # noqa: BLE001 - fall back to query param only
                 pass
-        if is_tls and not self._settings.verify_tls:
-            # wss:// only — websockets rejects an ssl context on a ws:// URI. Lets a
-            # self-signed dev cloud be reached without a cert bundle.
+        if is_tls and (not self._settings.verify_tls or self._settings.client_cert):
+            # wss:// only — websockets rejects an ssl context on a ws:// URI.
             import ssl
 
             ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
+            if not self._settings.verify_tls:
+                # Lets a self-signed dev cloud be reached without a cert bundle.
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+            if self._settings.client_cert:
+                # mTLS: present our client certificate (a combined cert+key PEM) on
+                # the handshake, per the optional mTLS option in integration.md §2.
+                try:
+                    ctx.load_cert_chain(self._settings.client_cert)
+                except (OSError, ssl.SSLError):
+                    log.warning(
+                        "client_cert %s could not be loaded; proceeding without mTLS",
+                        self._settings.client_cert,
+                    )
             kwargs["ssl"] = ctx
         return kwargs
 
@@ -211,6 +230,11 @@ class ConnectionManager:
         # On the control channel, tell the cloud our last-known state so any work done
         # offline reconciles (§4.12). Do this BEFORE replay so the cloud has context.
         if channel == CHANNEL_CONTROL:
+            # Register our self-configured identity first (§2.3): name/tags/platform/
+            # version. The cloud only learned hostname/os/version at device-approval
+            # time, so this keeps the daemons row current (e.g. after a self-update
+            # bumps the version, or the operator edits tags/name in config).
+            await self._send_register()
             await self._send_reconcile()
         # Replay this channel's durably-queued, still-unacked frames IN seq ORDER.
         await self._replay_pending(channel, ws)
@@ -235,6 +259,28 @@ class ConnectionManager:
             except Exception:  # noqa: BLE001 - stop replay; reconnect retries
                 log.debug("replay send failed at seq=%s", row["seq"])
                 return
+
+    async def _send_register(self) -> None:
+        """Emit ``daemon.register`` with this daemon's self-configured identity (§2.3).
+
+        Routed through the durable uplink so it's at-least-once like any other upstream
+        frame; the cloud handler is an idempotent update of the daemon's own row.
+        """
+        from .. import __version__
+
+        payload = {
+            "name": self._settings.daemon_name or _hostname(),
+            "tags": self._settings.tags,
+            "platform": self._settings.platform_override or _platform_string(),
+            "version": __version__,
+        }
+        if self._uplink is not None:
+            try:
+                await self._uplink.send(
+                    "daemon.register", payload, channel=CHANNEL_CONTROL
+                )
+            except Exception:  # noqa: BLE001 - registration is best-effort on connect
+                log.debug("failed to enqueue daemon.register")
 
     async def _send_reconcile(self) -> None:
         """Emit ``run.reconcile`` listing in-flight runs + their latest checkpoint seq.
@@ -364,9 +410,22 @@ class ConnectionManager:
             log.debug("heartbeat loop ended", exc_info=True)
 
     # ── token refresh (4401) ──────────────────────────────────────────────
-    async def _handle_token_expiry(self) -> None:
+    async def _handle_token_expiry(self) -> bool:
+        """Refresh the daemon access token after a 4401.
+
+        Returns True if a fresh token was obtained (reconnect immediately), or False
+        if the refresh failed (revoked daemon or unreachable token endpoint) so the
+        caller backs off instead of hot-looping.
+        """
         log.info("cloud closed with 4401; refreshing daemon token")
-        await tokens.refresh(self._settings)
+        new_token = await tokens.refresh(self._settings)
+        if new_token is None:
+            log.warning(
+                "daemon token refresh failed (revoked, or token endpoint unreachable); "
+                "backing off before retry"
+            )
+            return False
+        return True
 
     # ── backoff helper ────────────────────────────────────────────────────
     async def _sleep_with_jitter(self, base: float) -> None:
@@ -392,6 +451,25 @@ def _close_code(exc: BaseException) -> Optional[int]:
     if rcvd is not None and isinstance(getattr(rcvd, "code", None), int):
         return rcvd.code
     return None
+
+
+def _hostname() -> str:
+    """Best-effort local hostname for the daemon's default registration name."""
+    import socket
+
+    try:
+        return socket.gethostname() or "daemon"
+    except Exception:  # noqa: BLE001 - never let identity detection crash a connect
+        return "daemon"
+
+
+def _platform_string() -> str:
+    """A ``<system>-<machine>`` platform tag (e.g. ``darwin-arm64``) for the cloud row."""
+    import platform as _platform
+
+    system = (_platform.system() or "").lower() or "unknown"
+    machine = (_platform.machine() or "").lower() or "unknown"
+    return f"{system}-{machine}"
 
 
 def _with_token_query(url: str, token: str) -> str:

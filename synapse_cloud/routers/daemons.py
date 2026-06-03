@@ -21,8 +21,13 @@ from pydantic import BaseModel, Field
 from ..audit import get_audit
 from ..db import service_db
 from ..deps import Principal, get_principal, require_write
+from ..message_registry import MessageContext, on_daemon_message
 
 router = APIRouter(prefix="/daemons", tags=["daemons"])
+
+# Inbound daemon→cloud message: the daemon reports its self-configured identity on
+# (re)connect (integration.md §2.3).
+DAEMON_REGISTER = "daemon.register"
 
 
 class DaemonUpdate(BaseModel):
@@ -183,3 +188,44 @@ async def update_daemon(
 
     presence = await _presence_by_daemon(db, principal.org_id, [daemon_id])
     return _shape(daemon, presence.get(daemon_id))
+
+
+# ── Inbound daemon message: self-registration on connect (§2.3) ───────────────
+@on_daemon_message(DAEMON_REGISTER)
+async def handle_daemon_register(ctx: MessageContext, payload: dict) -> None:
+    """Apply a daemon's self-reported identity (name/tags/platform/version).
+
+    The daemon emits this on every (re)connect so the `daemons` row reflects its
+    current config and packaged version (e.g. after a self-update). Strictly scoped
+    to the connecting daemon's own row via ``ctx.daemon_id`` + ``ctx.org_id``. Only
+    fields actually present are written, so a partial frame never blanks a column.
+    """
+    update: dict[str, Any] = {}
+
+    name = payload.get("name")
+    if isinstance(name, str) and name.strip():
+        update["name"] = name.strip()
+
+    tags = payload.get("tags")
+    if isinstance(tags, list):
+        update["tags"] = [str(t) for t in tags]
+
+    platform = payload.get("platform")
+    if isinstance(platform, str) and platform.strip():
+        update["platform"] = platform.strip()
+
+    version = payload.get("version")
+    if isinstance(version, str) and version.strip():
+        update["version"] = version.strip()
+
+    if not update:
+        return
+
+    db = await service_db()
+    await (
+        db.table("daemons")
+        .update(update)
+        .eq("id", ctx.daemon_id)
+        .eq("org_id", ctx.org_id)
+        .execute()
+    )

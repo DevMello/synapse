@@ -440,6 +440,60 @@ async def test_checkpoint_handler_org_scoped(make_test_org, fresh_bus):
     assert a_rows == []  # nothing written under org_a
 
 
+# ── Inbound run.recover.ack ──────────────────────────────────────────────────
+async def test_recover_ack_writes_audit(test_org):
+    from synapse_cloud.audit import FakeAuditWriter, get_audit, set_audit
+    from synapse_cloud.routers.recovery import RUN_RECOVER_ACK
+
+    daemon_id, _ = await test_org.make_daemon(name="adopter")
+    agent_id = await _make_agent(test_org.org_id, daemon_id=daemon_id)
+    run_id = await _make_run(
+        test_org.org_id, agent_id, status="recovering", daemon_id=daemon_id
+    )
+
+    prev = get_audit()
+    fake = FakeAuditWriter()
+    set_audit(fake)
+    try:
+        n = await dispatch(
+            RUN_RECOVER_ACK,
+            _ctx(daemon_id, test_org.org_id, run_id),
+            {"agent_id": agent_id, "plan": {"disposition": "resume", "gated": []}},
+        )
+    finally:
+        set_audit(prev)
+
+    assert n >= 1
+    acks = [e for e in fake.events if e["action"] == RUN_RECOVER_ACK]
+    assert len(acks) == 1
+    ev = acks[0]
+    assert ev["org_id"] == test_org.org_id
+    assert ev["resource_id"] == run_id
+    assert ev["run_id"] == run_id
+    assert ev["detail"]["daemon_id"] == daemon_id
+    assert ev["detail"]["plan"] == {"disposition": "resume", "gated": []}
+
+
+async def test_recover_ack_missing_run_id_is_noop(test_org):
+    from synapse_cloud.audit import FakeAuditWriter, get_audit, set_audit
+    from synapse_cloud.routers.recovery import RUN_RECOVER_ACK
+
+    daemon_id, _ = await test_org.make_daemon(name="adopter2")
+    prev = get_audit()
+    fake = FakeAuditWriter()
+    set_audit(fake)
+    try:
+        await dispatch(
+            RUN_RECOVER_ACK,
+            MessageContext(daemon_id=daemon_id, org_id=test_org.org_id),
+            {"plan": {"disposition": "resume"}},
+        )
+    finally:
+        set_audit(prev)
+    # No run_id anywhere -> nothing recorded.
+    assert [e for e in fake.events if e["action"] == RUN_RECOVER_ACK] == []
+
+
 # ── RBAC ─────────────────────────────────────────────────────────────────────
 async def test_recover_requires_write(make_test_org, client, fresh_bus):
     org = await make_test_org(role="viewer")
