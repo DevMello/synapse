@@ -37,8 +37,11 @@ async def test_emit_snapshot_sends_telemetry_metrics(store, uplink):
     assert metrics, "expected at least one telemetry.metric frame"
     # All health telemetry rides the telemetry channel (never control).
     assert all(f.channel == "telemetry" for f in metrics)
-    # The point-in-time snapshot metric carries the whole payload.
-    assert any(isinstance(f.payload.get("value"), dict) for f in metrics)
+    # Every metric value is NUMERIC — the cloud's metrics.value is double precision, so a
+    # dict-valued metric would be rejected (the bug a live-cloud run caught).
+    assert all(isinstance(f.payload.get("value"), (int, float)) for f in metrics)
+    names = {f.payload.get("name") for f in metrics}
+    assert "daemon.cpu_percent" in names and "daemon.uptime_seconds" in names
     assert payload["version"]
 
 
@@ -48,9 +51,10 @@ async def test_health_service_ticks_then_stops(store, uplink):
     await asyncio.sleep(0.05)
     await svc.stop()
     await asyncio.wait_for(task, timeout=1.0)
-    # Emitted at least twice (immediate + at least one interval).
-    snapshots = [f for f in uplink.of_type("telemetry.metric") if isinstance(f.payload.get("value"), dict)]
-    assert len(snapshots) >= 2
+    # One uptime metric per tick -> emitted at least twice (immediate + an interval).
+    ticks = [f for f in uplink.of_type("telemetry.metric")
+             if f.payload.get("name") == "daemon.uptime_seconds"]
+    assert len(ticks) >= 2
 
 
 # ── daemon.ping ──────────────────────────────────────────────────────────────

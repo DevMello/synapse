@@ -32,9 +32,8 @@ from ..uplink import CHANNEL_CONTROL, CHANNEL_TELEMETRY, get_uplink
 
 log = get_logger(__name__)
 
-# The metric name the snapshot is shipped under (the dashboard subscribes to this).
-SNAPSHOT_METRIC = "daemon.health"
-# Per-field metric names, so a dashboard that prefers scalar series can chart them.
+# Per-field metric names — each shipped as a scalar telemetry.metric (numeric value).
+
 _FIELD_METRICS = {
     "cpu_percent": "daemon.cpu_percent",
     "mem_mb": "daemon.mem_mb",
@@ -83,27 +82,25 @@ async def collect_snapshot() -> dict[str, Any]:
 
 
 async def emit_snapshot(*, channel: str = CHANNEL_TELEMETRY) -> dict[str, Any]:
-    """Sample and ship one health snapshot upstream. Returns the payload sent.
+    """Sample and ship the health snapshot upstream as SCALAR telemetry metrics.
 
-    Sends a single ``telemetry.metric`` carrying the whole snapshot (so the dashboard gets
-    a consistent point-in-time view) plus one scalar ``telemetry.metric`` per numeric field
-    (so series-oriented panels can chart them). All on the telemetry channel — never
-    control — so it cannot block command/ack traffic. Best-effort: send failures are logged.
+    The cloud's ``telemetry.metric`` value is numeric (a ``double precision`` column), so we
+    emit one scalar metric per numeric field — NEVER the whole snapshot dict as a single
+    metric value (Postgres rejects a non-numeric value: ``22P02``). The full point-in-time
+    snapshot is still available to a prober via the ``daemon.pong`` reply. All on the
+    telemetry channel so it can't block control/ack traffic. Best-effort; failures logged.
+    Returns the sampled payload.
     """
     payload = await collect_snapshot()
     uplink = get_uplink()
+    version = payload.get("version")
     try:
-        await uplink.send(
-            "telemetry.metric",
-            {"name": SNAPSHOT_METRIC, "value": payload},
-            channel=channel,
-        )
         for field, metric_name in _FIELD_METRICS.items():
             value = payload.get(field)
             if isinstance(value, (int, float)):
                 await uplink.send(
                     "telemetry.metric",
-                    {"name": metric_name, "value": value, "version": payload.get("version")},
+                    {"name": metric_name, "value": value, "labels": {"version": version}},
                     channel=channel,
                 )
     except Exception:  # noqa: BLE001 - telemetry is best-effort; never sink the loop
