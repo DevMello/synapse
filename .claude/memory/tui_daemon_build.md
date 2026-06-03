@@ -54,6 +54,15 @@ status `capability.status` {daemon_capability_id,status,exposed_tools}; memory `
 (telemetry, redacted) / `memory.sync` (one op/cmd). `daemon.update`/`daemon.ping`/`skill.install`
 are handled defensively but the cloud doesn't currently push them.
 
+**Integration hardening (2026-06-02, PR #1):** the daemon now sends `daemon.register`
+{name,tags,platform,version} on control-channel connect (cloud handler in
+`routers/daemons.py` updates the daemons row, org+id scoped, partial-frame safe) — this
+is the §2.3 "registering on connect" step. The cloud now also handles the daemon's
+`run.recover.ack` {run_id,agent_id,plan} (`routers/recovery.py`, audit-only). Fixed a
+daemon revocation **hot-loop**: on a 4401 where token refresh fails, `manager._channel_loop`
+must back off (not `continue`) — `_handle_token_expiry()` returns bool success now. `client_cert`
+is wired into the WS TLS ctx (mTLS). Live loop verified by `tools/tests/live_cloud_smoke`.
+
 **Tests**: self-contained under `tests/worker/` (NO Supabase, NO network) with their own
 `conftest.py` — tmp `~/.synapse` via `SYNAPSE_HOME`, `SYNAPSE_WORKER_ENV=test`, all
 singletons reset per test, plus a **`MockCloud` WS hub** fixture (`tools/tests/worker/mock_cloud.py`)
