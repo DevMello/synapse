@@ -1,6 +1,6 @@
 """End-to-end smoke test for the WebSocket daemon hub.
 
-Run as:  python -m tests.ws_smoke
+Run as:  python -m tools.tests.ws_smoke
 
 It boots the real app under uvicorn (so the lifespan installs the WebSocket hub +
 real command bus), seeds an org + daemon in Supabase, mints a daemon access token,

@@ -1,8 +1,8 @@
 """LIVE end-to-end smoke test: the real synapse-worker daemon against the real cloud.
 
-Run as:  python -m tests.live_cloud_smoke
+Run as:  python -m tools.tests.live_cloud_smoke
 
-Unlike ``tests/ws_smoke.py`` (which drives a raw ``websockets`` client), this boots the
+Unlike ``tools/tests/ws_smoke.py`` (which drives a raw ``websockets`` client), this boots the
 **actual** ``synapse_worker`` daemon stack — its ``ConnectionManager``, the durable
 ``WebSocketUplink``, the command router, and the real command handlers — and connects it
 to the **real Cloud Backend** running under uvicorn against **real Supabase**. It proves

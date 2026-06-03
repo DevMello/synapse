@@ -56,9 +56,11 @@ are handled defensively but the cloud doesn't currently push them.
 
 **Tests**: self-contained under `tests/worker/` (NO Supabase, NO network) with their own
 `conftest.py` — tmp `~/.synapse` via `SYNAPSE_HOME`, `SYNAPSE_WORKER_ENV=test`, all
-singletons reset per test, plus a **`MockCloud` WS hub** fixture (`tests/worker/mock_cloud.py`)
-speaking the cloud frames. Run `.venv/Scripts/python.exe -m pytest tests/worker/` (283 pass).
-**LIVE end-to-end**: `python -m tests.live_cloud_smoke` boots the REAL cloud (uvicorn + real
+singletons reset per test, plus a **`MockCloud` WS hub** fixture (`tools/tests/worker/mock_cloud.py`)
+speaking the cloud frames. Tests + supabase migrations live under **`tools/`** (`tools/tests/`,
+`tools/supabase/migrations/`; pytest `testpaths=["tools/tests"]`). Run
+`.venv/Scripts/python.exe -m pytest tools/tests/worker/` (283 pass).
+**LIVE end-to-end**: `python -m tools.tests.live_cloud_smoke` boots the REAL cloud (uvicorn + real
 Supabase) and drives the actual daemon stack over live WebSockets — verifies presence/online,
 cloud→daemon command+ack, and daemon→cloud upstream persisted in Supabase (PASS, exits clean).
 It caught a bug MockCloud couldn't: the health emitter shipped the whole snapshot dict as a
