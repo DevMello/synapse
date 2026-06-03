@@ -213,6 +213,25 @@ def test_file_keystore_roundtrip(tmp_path):
     assert b"v2" not in raw
 
 
+def test_file_keystore_survives_binary_ciphertext_on_windows(tmp_path):
+    # Regression: secure_write must round-trip RAW ciphertext containing 0x0a/0x0d bytes
+    # (the Windows CRLF-translation bug). Write enough entries that the sealed blob is
+    # large enough to almost certainly contain both bytes, then re-read from disk.
+    from synapse_worker.paths import WorkerPaths
+
+    paths = WorkerPaths(home=tmp_path / "fks-bin")
+    paths.ensure_layout()
+    ks = FileKeystore(paths)
+    for i in range(50):
+        ks.set("synapse:daemon", f"k{i}", f"value-{i}-{'x' * 30}")
+
+    raw = paths.token_file.read_bytes()
+    assert 0x0A in raw and 0x0D in raw  # the bytes the bug used to corrupt
+
+    fresh = FileKeystore(paths)  # re-reads + decrypts the blob from disk
+    assert all(fresh.get("synapse:daemon", f"k{i}") == f"value-{i}-{'x' * 30}" for i in range(50))
+
+
 # ── login: full flow wiring (tokens -> keystore, ids -> store.kv) ───────────────
 @pytest.mark.asyncio
 async def test_login_persists_tokens_and_identity(monkeypatch, store, keystore):

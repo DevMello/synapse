@@ -115,23 +115,23 @@ class FileKeystore(Keystore):
         return nacl.secret.SecretBox(key)
 
     # ── on-disk map ──────────────────────────────────────────────────────────
-    # The blob is stored base64-*text*, not raw ciphertext: secure_write goes through a
-    # text-mode os.open on Windows that would translate 0x0A bytes in binary ciphertext,
-    # corrupting it. Base64 has no such bytes, so it round-trips on every platform.
+    # The blob is the raw libsodium ciphertext, written/read as bytes. secure_write opens
+    # with O_BINARY on Windows, so 0x0A bytes are no longer translated to CRLF — there is
+    # no need to base64-armor the ciphertext just to survive the file write.
     def _load(self) -> dict[str, str]:
         if not self._blob_path.is_file():
             return {}
-        blob = self._blob_path.read_text(encoding="ascii").strip()
+        blob = self._blob_path.read_bytes()
         if not blob:
             return {}
-        plaintext = self._box().decrypt(_b64d(blob))
+        plaintext = self._box().decrypt(blob)
         data = json.loads(plaintext.decode("utf-8"))
         return {str(k): str(v) for k, v in data.items()}
 
     def _save(self, data: dict[str, str]) -> None:
         plaintext = json.dumps(data, separators=(",", ":")).encode("utf-8")
         ciphertext = bytes(self._box().encrypt(plaintext))
-        secure_write(self._blob_path, _b64e(ciphertext))
+        secure_write(self._blob_path, ciphertext)
 
     @staticmethod
     def _slot(service: str, key: str) -> str:
