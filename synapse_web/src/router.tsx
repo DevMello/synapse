@@ -1,19 +1,23 @@
+import { lazy } from "react";
 import { createBrowserRouter } from "react-router-dom";
 import { AppLayout } from "./components/Shell";
 import Tweaks from "./screens/Tweaks";
 
-import Dashboard from "./screens/Dashboard";
-import Agents from "./screens/Agents";
-import Daemons from "./screens/Daemons";
-import Connect from "./screens/Connect";
-import Runs from "./screens/Runs";
-import Approvals from "./screens/Approvals";
-import Alerts from "./screens/Alerts";
-import Marketplace from "./screens/Marketplace";
-import Webhooks from "./screens/Webhooks";
-import Notifications from "./screens/Notifications";
-import Settings from "./screens/Settings";
-import AgentDetail from "./screens/agent/AgentDetail";
+// Screens are code-split: each becomes its own async chunk fetched on navigation,
+// so the initial load is just the shell + the landing route. The Suspense boundary
+// lives in AppLayout (components/Shell.tsx), which wraps the routed <Outlet />.
+const Dashboard = lazy(() => import("./screens/Dashboard"));
+const Agents = lazy(() => import("./screens/Agents"));
+const Daemons = lazy(() => import("./screens/Daemons"));
+const Connect = lazy(() => import("./screens/Connect"));
+const Runs = lazy(() => import("./screens/Runs"));
+const Approvals = lazy(() => import("./screens/Approvals"));
+const Alerts = lazy(() => import("./screens/Alerts"));
+const Marketplace = lazy(() => import("./screens/Marketplace"));
+const Webhooks = lazy(() => import("./screens/Webhooks"));
+const Notifications = lazy(() => import("./screens/Notifications"));
+const Settings = lazy(() => import("./screens/Settings"));
+const AgentDetail = lazy(() => import("./screens/agent/AgentDetail"));
 
 export const router = createBrowserRouter(
   [

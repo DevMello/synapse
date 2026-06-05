@@ -1,6 +1,6 @@
 // Synapse Web UI — app shell: Sidebar + HeaderBar + CommandPalette + AppLayout.
 // Ported from the prototype's Shell.jsx; navigation now runs on react-router.
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Icon, LogoMark } from "./Primitives";
 import { Toast } from "./Common";
@@ -236,6 +236,15 @@ export function TweaksSlot({ children }: { children?: ReactNode }) {
   return <>{children}</>;
 }
 
+// Shown while a route's code-split chunk is fetched (usually a single frame).
+function RouteFallback() {
+  return (
+    <div className="db-content" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <span className="db-mono db-muted">Loading…</span>
+    </div>
+  );
+}
+
 export function AppLayout({ tweaks }: { tweaks?: ReactNode }) {
   const { pathname } = useLocation();
   const setPalette = useUI((s) => s.setPalette);
@@ -257,7 +266,9 @@ export function AppLayout({ tweaks }: { tweaks?: ReactNode }) {
       <Sidebar />
       <div className="db-main">
         <HeaderBar />
-        {isConnect ? <Outlet /> : <div className="db-content fx-grid-light"><Outlet /></div>}
+        <Suspense fallback={<RouteFallback />}>
+          {isConnect ? <Outlet /> : <div className="db-content fx-grid-light"><Outlet /></div>}
+        </Suspense>
       </div>
       <CommandPalette />
       {tweaks}

@@ -1,7 +1,7 @@
 // Synapse Web UI — Agent Detail shell: hero row, enable toggle, run-now, and the
 // tab nav + registry. The shell is foundation-owned and never edited by a worker;
 // each tab's body lives in its own file under ./tabs and is filled in per unit.
-import { useState, type ComponentType } from "react";
+import { Suspense, lazy, useState, type ComponentType, type LazyExoticComponent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Chip, Icon, Button } from "../../components/Primitives";
 import { AgentAvatar, Toggle, daemonName } from "../../components/Common";
@@ -10,19 +10,22 @@ import { useUI } from "../../store/ui";
 import { data } from "../../api/queries";
 import { AgentProvider } from "./context";
 
-import OverviewTab from "./tabs/Overview";
-import EditorTab from "./tabs/Editor";
-import VersionsTab from "./tabs/Versions";
-import ScheduleTab from "./tabs/Schedule";
-import ToolsTab from "./tabs/Tools";
-import PluginsTab from "./tabs/Plugins";
-import EnvironmentTab from "./tabs/Environment";
-import MemoryTab from "./tabs/Memory";
-import RunsTab from "./tabs/Runs";
-import LogsTab from "./tabs/Logs";
-import AnalyticsTab from "./tabs/Analytics";
+// Tabs are code-split: the heavy ones (Editor → CodeMirror, Analytics → Recharts,
+// Runs → live trace) become async chunks fetched only when their tab is opened, so
+// none of that weight is in the initial load. A Suspense boundary wraps the tab body.
+const OverviewTab = lazy(() => import("./tabs/Overview"));
+const EditorTab = lazy(() => import("./tabs/Editor"));
+const VersionsTab = lazy(() => import("./tabs/Versions"));
+const ScheduleTab = lazy(() => import("./tabs/Schedule"));
+const ToolsTab = lazy(() => import("./tabs/Tools"));
+const PluginsTab = lazy(() => import("./tabs/Plugins"));
+const EnvironmentTab = lazy(() => import("./tabs/Environment"));
+const MemoryTab = lazy(() => import("./tabs/Memory"));
+const RunsTab = lazy(() => import("./tabs/Runs"));
+const LogsTab = lazy(() => import("./tabs/Logs"));
+const AnalyticsTab = lazy(() => import("./tabs/Analytics"));
 
-interface TabDef { id: string; name: string; icon: string; Component: ComponentType }
+interface TabDef { id: string; name: string; icon: string; Component: LazyExoticComponent<ComponentType> }
 
 const AGENT_TABS: TabDef[] = [
   { id: "overview", name: "Overview", icon: "home", Component: OverviewTab },
@@ -56,7 +59,7 @@ export default function AgentDetail() {
     setTab("runs");
   }
 
-  const Active = AGENT_TABS.find((t) => t.id === tab)?.Component ?? (() => <ScreenStub name="Tab" />);
+  const Active = AGENT_TABS.find((t) => t.id === tab)?.Component;
 
   return (
     <AgentProvider agent={agent}>
@@ -104,7 +107,11 @@ export default function AgentDetail() {
           ))}
         </div>
 
-        <div className="db-agent-tabbody"><Active /></div>
+        <div className="db-agent-tabbody">
+          <Suspense fallback={<div className="db-mono db-muted" style={{ padding: "24px 4px" }}>Loading…</div>}>
+            {Active ? <Active /> : <ScreenStub name="Tab" />}
+          </Suspense>
+        </div>
       </div>
     </AgentProvider>
   );
