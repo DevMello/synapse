@@ -267,13 +267,20 @@ class ConnectionManager:
         frame; the cloud handler is an idempotent update of the daemon's own row.
         """
         from .. import __version__
+        from ..auth import keys as auth_keys
 
-        payload = {
+        payload: dict[str, Any] = {
             "name": self._settings.daemon_name or _hostname(),
             "tags": self._settings.tags,
             "platform": self._settings.platform_override or _platform_string(),
             "version": __version__,
         }
+        # Register our X25519 public key so the Web UI can seal env-var values to this
+        # daemon (§4.6). Read-only: we only report a key that pairing already created —
+        # we never generate one here. Omitted if the daemon isn't paired yet.
+        pubkey = auth_keys.get_daemon_public_key()
+        if pubkey:
+            payload["e2e_public_key"] = pubkey
         if self._uplink is not None:
             try:
                 await self._uplink.send(

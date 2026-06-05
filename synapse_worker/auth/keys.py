@@ -78,8 +78,8 @@ def ensure_daemon_keypair(*, keystore: Optional[Keystore] = None) -> crypto.KeyP
 def get_daemon_public_key(*, keystore: Optional[Keystore] = None) -> Optional[str]:
     """The public key to register with the cloud (the Web UI seals env vars to it).
 
-    TODO(connection unit): upload this to the cloud as ``daemons.public_key`` once the
-    daemon endpoint exists; for this unit it is persisted + exposed only.
+    Uploaded to ``daemons.e2e_public_key`` on every control-channel connect via the
+    ``daemon.register`` frame (see ``connection/manager.py:_send_register``).
     """
     return _ks(keystore).get(SERVICE, KEY_DAEMON_PUBLIC)
 

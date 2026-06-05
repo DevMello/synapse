@@ -202,6 +202,102 @@ async def _run() -> None:
         assert float(row["value"]) == 42.5, row
         print("  C. PASS — daemon->cloud upstream frame persisted by the real cloud handler")
 
+        # ── D. REAL agent run: deploy + run a CLI agent, exercise execution ─────
+        # The product's core path: the cloud deploys an agent + triggers a run, the
+        # daemon SPAWNS a real subprocess via the CliAdapter, streams its stdout as
+        # redacted telemetry, and reports run.finished. We assert in Supabase that the
+        # reasoning trace persisted AND the runs row finalized to 'succeeded'.
+        marker = f"synapse-smoke-{uuid.uuid4().hex[:8]}"
+        agent_row = (
+            await db.table("agents")
+            .insert(
+                {"org_id": org_id, "name": "smoke-cli", "type": "cli", "daemon_id": daemon_id}
+            )
+            .execute()
+        ).data[0]
+        agent_id = agent_row["id"]
+        run_row = (
+            await db.table("runs")
+            .insert(
+                {
+                    "org_id": org_id,
+                    "agent_id": agent_id,
+                    "daemon_id": daemon_id,
+                    "trigger": "manual",
+                    "status": "running",
+                }
+            )
+            .execute()
+        ).data[0]
+        run_id = run_row["id"]
+
+        py = sys.executable.replace("\\", "/")  # forward slashes -> valid in TOML "..."
+        manifest_toml = (
+            "[agent]\n"
+            f'id = "{agent_id}"\n'
+            'name = "smoke-cli"\n'
+            'type = "cli"\n'
+            "version = 1\n\n"
+            "[cli]\n"
+            f'command = "{py}"\n'
+            f'args = ["-c", "print(\'{marker}\')"]\n\n'
+            "[limits]\n"
+            "timeout_sec = 30\n"
+        )
+
+        dep = await get_command_bus().send(
+            daemon_id,
+            "agent.deploy",
+            {"agent": {"id": agent_id}, "manifest": manifest_toml},
+            idempotency_key=f"live-deploy-{agent_id}",
+        )
+        assert dep.delivered is True, f"agent.deploy not delivered: {dep}"
+
+        # Give the daemon a beat to persist the manifest before triggering the run.
+        async def _agent_ready():
+            return await daemon.store.fetchone(
+                "SELECT id FROM agents WHERE id=?", (agent_id,)
+            )
+
+        assert await _poll(_agent_ready, timeout=10.0), "daemon never stored the deployed agent"
+
+        run_cmd = await get_command_bus().send(
+            daemon_id,
+            "agent.run",
+            {"run_id": run_id, "agent_id": agent_id, "prompt_vars": {}},
+            idempotency_key=f"live-run-{run_id}",
+        )
+        assert run_cmd.delivered is True, f"agent.run not delivered: {run_cmd}"
+
+        # The agent's stdout marker must arrive as a persisted reasoning trace.
+        async def _trace_row():
+            rows = (
+                await db.table("reasoning_traces")
+                .select("content_redacted")
+                .eq("org_id", org_id)
+                .eq("run_id", run_id)
+                .execute()
+            ).data
+            for r in rows or []:
+                if marker in (r.get("content_redacted") or ""):
+                    return r
+            return None
+
+        assert await _poll(_trace_row, timeout=20.0), (
+            "agent stdout never persisted as a reasoning trace (execution path broken)"
+        )
+
+        # And the run must finalize to 'succeeded' via the real run.finished handler.
+        async def _run_succeeded():
+            rows = (
+                await db.table("runs").select("status").eq("org_id", org_id)
+                .eq("id", run_id).execute()
+            ).data
+            return rows and rows[0]["status"] == "succeeded"
+
+        assert await _poll(_run_succeeded, timeout=20.0), "run never finalized to 'succeeded'"
+        print("  D. PASS — real agent subprocess ran; trace + run.finished persisted in Supabase")
+
         print("PASS: live_cloud_smoke — real daemon <-> real cloud loop verified end to end")
         ok = True
     except (AssertionError, SystemExit) as exc:
