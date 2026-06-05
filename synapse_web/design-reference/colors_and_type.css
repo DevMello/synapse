@@ -1,0 +1,219 @@
+/* ============================================================================
+   SYNAPSE DESIGN SYSTEM — colors_and_type.css
+   Warm ember aurora. Autonomous, technical, calm.
+   The single source of truth for color + type tokens.
+   Import this file, then use the variables and semantic utility classes.
+   Fonts are Google Fonts (Inter, Instrument Serif, JetBrains Mono).
+   ============================================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ---------------------------------------------------------------------------
+   1. TOKENS
+   --------------------------------------------------------------------------- */
+:root {
+  /* — Ink: warm-tinted blacks. NEVER pure #000 (reads cold against bone). — */
+  --ink-0: #0c0b09;
+  --ink-1: #18150f;
+  --ink-2: #221d15;
+  --ink: var(--ink-0);
+
+  /* — Bone: warm off-whites with a hair of yellow. Avoid pure #fff. — */
+  --bone-0: #f4efe8;
+  --bone-1: #ebe5dc;
+  --bone: var(--bone-0);
+  --paper: #f8f5f0;
+
+  /* — Accent: the single hero color. Use sparingly. — */
+  --accent: #ef6a2a;
+  --accent-soft: #f59264;
+  --accent-deep: #d44a14;
+  --accent-glow: rgba(239, 106, 42, 0.55);
+
+  /* — Neutrals & lines — */
+  --mute: #8a8378;
+  --line-light: rgba(12, 11, 9, 0.08);
+  --line-dark: rgba(255, 255, 255, 0.08);
+  --grid-light: rgba(12, 11, 9, 0.045);
+  --grid-dark: rgba(255, 255, 255, 0.055);
+
+  /* — Status: the ONLY saturated greens/blues allowed in the system — */
+  --status-ok: #1a7a4d;
+  --status-ok-bg: rgba(78, 196, 106, 0.12);
+  --status-warn: #c9521a;
+  --status-warn-bg: rgba(239, 106, 42, 0.12);
+  --status-info: #2a4ea8;
+  --status-info-bg: rgba(50, 90, 200, 0.12);
+  --status-muted-bg: rgba(0, 0, 0, 0.05);
+
+  /* — Type families — */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-serif: 'Instrument Serif', serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* — Radius — */
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 22px;
+  --radius-xl: 28px;
+  --radius-pill: 999px;
+
+  /* — Spacing scale — */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 56px;
+  --space-10: 80px;
+  --space-11: 100px;
+  --section-padding-y: 100px;
+  --panel-padding: 26px;
+  --card-gap: 16px;
+
+  /* — Shadow — */
+  --shadow-panel-lift: 0 30px 80px -30px rgba(239, 106, 42, 0.25), 0 12px 40px -12px rgba(0, 0, 0, 0.25);
+  --shadow-button-glow: 0 12px 36px -8px rgba(239, 106, 42, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  --shadow-card-soft: 0 8px 28px -10px rgba(239, 106, 42, 0.55);
+  --shadow-hero-mock: 0 -30px 80px -20px rgba(0, 0, 0, 0.45);
+
+  /* — Motion — */
+  --motion-fast: 150ms ease;
+  --motion-base: 200ms ease;
+  --motion-slow: 300ms ease;
+}
+
+/* ---------------------------------------------------------------------------
+   2. TYPE SCALE — semantic utilities
+   Sizes use clamp() for the fluid display/h1 steps.
+   --------------------------------------------------------------------------- */
+.t-display {
+  font-family: var(--font-sans);
+  font-size: clamp(48px, 7vw, 96px);
+  font-weight: 500;
+  line-height: 1.02;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+.t-h1 {
+  font-family: var(--font-sans);
+  font-size: clamp(40px, 5.4vw, 72px);
+  font-weight: 500;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+.t-h2 {
+  font-family: var(--font-sans);
+  font-size: 32px;
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+.t-h3 {
+  font-family: var(--font-sans);
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+.t-body-lg {
+  font-family: var(--font-sans);
+  font-size: 17.5px;
+  font-weight: 400;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+.t-body {
+  font-family: var(--font-sans);
+  font-size: 14.5px;
+  font-weight: 400;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+.t-small {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.t-kicker {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.t-code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* ---------------------------------------------------------------------------
+   3. TYPE TREATMENTS
+   --------------------------------------------------------------------------- */
+/* One italic-serif phrase per heading, no more. Inline inside the sans headline. */
+.serif-accent {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+
+/* Optional 2px underline under the serif phrase. Section headers, not the hero. */
+.serif-underline {
+  position: relative;
+}
+.serif-underline::after {
+  content: '';
+  display: block;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0.08em;
+  height: 2px;
+  background: currentColor;
+  opacity: 0.85;
+}
+
+/* Section-number eyebrow. Mono, uppercase, leading dash. Accent on light surfaces. */
+.sec-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.sec-kicker::before {
+  content: '';
+  width: 24px;
+  height: 1px;
+  background: currentColor;
+}
+
+/* ---------------------------------------------------------------------------
+   4. KEYFRAMES
+   --------------------------------------------------------------------------- */
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 var(--accent-glow); }
+  70%  { box-shadow: 0 0 0 8px rgba(239, 106, 42, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 106, 42, 0); }
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; }
+}

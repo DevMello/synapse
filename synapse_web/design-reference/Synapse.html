@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Synapse — Control surface</title>
+<link rel="stylesheet" href="colors_and_type.css">
+<link rel="stylesheet" href="effects.css">
+<link rel="stylesheet" href="app/app.css">
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script src="app/data.js"></script>
+  <script type="text/babel" src="app/Primitives.jsx"></script>
+  <script type="text/babel" src="app/Common.jsx"></script>
+  <script type="text/babel" src="app/Terminal.jsx"></script>
+  <script type="text/babel" src="app/Trace.jsx"></script>
+  <script type="text/babel" src="app/Shell.jsx"></script>
+  <script type="text/babel" src="app/Dashboard.jsx"></script>
+  <script type="text/babel" src="app/Daemons.jsx"></script>
+  <script type="text/babel" src="app/Connect.jsx"></script>
+  <script type="text/babel" src="app/Agents.jsx"></script>
+  <script type="text/babel" src="app/AgentTabs1.jsx"></script>
+  <script type="text/babel" src="app/AgentTabs2.jsx"></script>
+  <script type="text/babel" src="app/AgentTabs3.jsx"></script>
+  <script type="text/babel" src="app/AgentDetail.jsx"></script>
+  <script type="text/babel" src="app/Views.jsx"></script>
+
+  <script type="text/babel">
+    const VIEW_TITLES = { dashboard: 'Dashboard', agents: 'Agents', daemons: 'Daemons', runs: 'Runs',
+      approvals: 'Approvals', alerts: 'Alerts', marketplace: 'Marketplace', webhooks: 'Webhooks',
+      notifications: 'Notifications', settings: 'Settings', connect: 'Connect a device', agent: 'Agents' };
+
+    function App() {
+      const [route, setRoute] = React.useState({ view: 'dashboard' });
+      const [palette, setPalette] = React.useState(false);
+      const [wizard, setWizard] = React.useState(false);
+      const [toastMsg, setToastState] = React.useState(null);
+      const [state, setState] = React.useState({ approvals: DATA.approvals });
+
+      const toastTimer = React.useRef(null);
+      function toast(t) {
+        setToastState(t);
+        clearTimeout(toastTimer.current);
+        toastTimer.current = setTimeout(() => setToastState(null), 2800);
+      }
+
+      function nav(next) {
+        if (next.newAgent) { setWizard(true); setRoute({ view: 'agents' }); return; }
+        setRoute(next);
+        const sc = document.querySelector('.db-content');
+        if (sc) sc.scrollTop = 0;
+      }
+
+      React.useEffect(() => {
+        const h = e => {
+          if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette(p => !p); }
+        };
+        window.addEventListener('keydown', h);
+        return () => window.removeEventListener('keydown', h);
+      }, []);
+
+      const counts = { approvals: state.approvals.length, alerts: DATA.alerts.length };
+
+      // breadcrumb
+      let crumb = [{ label: 'northwind', to: { view: 'dashboard' } }, { label: VIEW_TITLES[route.view] || 'Home' }];
+      if (route.view === 'agent') {
+        const a = DATA.agents.find(x => x.id === route.agentId);
+        crumb = [{ label: 'northwind', to: { view: 'dashboard' } }, { label: 'Agents', to: { view: 'agents' } }, { label: a ? a.name : 'Agent' }];
+      }
+
+      let view;
+      const v = route.view;
+      if (v === 'dashboard') view = <Dashboard nav={nav} state={state} />;
+      else if (v === 'agents') view = <Agents nav={nav} state={state} openWizard={() => setWizard(true)} toast={toast} />;
+      else if (v === 'agent') view = <AgentDetail route={route} nav={nav} toast={toast} />;
+      else if (v === 'daemons') view = <Daemons nav={nav} toast={toast} />;
+      else if (v === 'runs') view = <GlobalRuns nav={nav} />;
+      else if (v === 'approvals') view = <Approvals state={state} setState={setState} nav={nav} toast={toast} />;
+      else if (v === 'alerts') view = <Alerts nav={nav} />;
+      else if (v === 'marketplace') view = <Marketplace openWizard={() => setWizard(true)} />;
+      else if (v === 'webhooks') view = <Webhooks toast={toast} />;
+      else if (v === 'notifications') view = <Notifications toast={toast} />;
+      else if (v === 'settings') view = <Settings toast={toast} />;
+
+      const isConnect = v === 'connect';
+
+      return (
+        <div className="db-app">
+          <Sidebar route={route} nav={nav} counts={counts} />
+          <div className="db-main">
+            <HeaderBar crumb={crumb} nav={nav} onPalette={() => setPalette(true)} counts={counts} />
+            {isConnect
+              ? <Connect nav={nav} toast={toast} />
+              : <div className="db-content fx-grid-light">{view}</div>}
+          </div>
+          <CommandPalette open={palette} onClose={() => setPalette(false)} nav={nav} />
+          <NewAgentWizard open={wizard} onClose={() => setWizard(false)} nav={nav} toast={toast} />
+          <Toast toast={toastMsg} />
+        </div>
+      );
+    }
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
