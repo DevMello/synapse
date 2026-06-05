@@ -229,6 +229,26 @@ async def test_register_updates_identity(test_org):
     assert row["version"] == "0.2.0"
 
 
+async def test_register_uploads_e2e_public_key(test_org):
+    # §4.6: the daemon's X25519 public key arrives via register and lands in the
+    # daemons row so the env-var public-key endpoint can serve it (previously a TODO).
+    daemon_id, _ = await test_org.make_daemon(name="keyholder")
+    await dispatch(
+        DAEMON_REGISTER,
+        _reg_ctx(daemon_id, test_org.org_id),
+        {"name": "keyholder", "e2e_public_key": "MCowBQYDK2VuAyEA-fake-x25519"},
+    )
+    db = await service_db()
+    row = (
+        await db.table("daemons")
+        .select("e2e_public_key")
+        .eq("org_id", test_org.org_id)
+        .eq("id", daemon_id)
+        .execute()
+    ).data[0]
+    assert row["e2e_public_key"] == "MCowBQYDK2VuAyEA-fake-x25519"
+
+
 async def test_register_partial_frame_does_not_blank_fields(test_org):
     daemon_id, _ = await test_org.make_daemon(name="keep-me")
     # Only a version bump (e.g. after a self-update) — name must NOT be cleared.

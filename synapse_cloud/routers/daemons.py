@@ -218,6 +218,12 @@ async def handle_daemon_register(ctx: MessageContext, payload: dict) -> None:
     if isinstance(version, str) and version.strip():
         update["version"] = version.strip()
 
+    # X25519 public key the Web UI seals env-var values to (§4.6). Without this the
+    # env-var public-key endpoint 404s and no value can ever be encrypted to the daemon.
+    e2e_public_key = payload.get("e2e_public_key")
+    if isinstance(e2e_public_key, str) and e2e_public_key.strip():
+        update["e2e_public_key"] = e2e_public_key.strip()
+
     if not update:
         return
 

@@ -272,6 +272,36 @@ async def test_register_reports_configured_name_and_tags(mock_cloud, store):
     assert msg["payload"]["tags"] == ["gpu", "us-east", "beta"]
 
 
+async def test_register_includes_e2e_public_key_when_paired(mock_cloud, store):
+    # A paired daemon has a stored X25519 public key; register must carry it so the
+    # cloud can populate daemons.e2e_public_key (env-var sealing, §4.6).
+    from synapse_worker.auth import keys as auth_keys
+
+    ks = get_keystore()
+    ks.set(tokens_mod.KEYSTORE_SERVICE, tokens_mod.KEY_ACCESS, "access-1")
+    ks.set(tokens_mod.KEYSTORE_SERVICE, tokens_mod.KEY_REFRESH, "refresh-1")
+    ks.set(auth_keys.SERVICE, auth_keys.KEY_DAEMON_PUBLIC, "PUBKEY-b64")
+
+    settings = _settings_for(mock_cloud)
+    mgr = ConnectionManager(_FakeDaemon(settings=settings, store=store))
+    task = asyncio.create_task(mgr.run())
+    try:
+        msg = await mock_cloud.wait_for("daemon.register")
+    finally:
+        await mgr.stop()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+    assert msg["payload"]["e2e_public_key"] == "PUBKEY-b64"
+
+
+async def test_register_omits_public_key_when_unpaired(mock_cloud, store):
+    # No daemon public key in the keystore -> the field is simply absent (no crash).
+    async with _running(mock_cloud, store):
+        msg = await mock_cloud.wait_for("daemon.register")
+    assert "e2e_public_key" not in msg["payload"]
+
+
 async def test_handle_token_expiry_signals_refresh_outcome(mock_cloud, store, monkeypatch):
     # Unit-level: _handle_token_expiry returns True on a successful refresh, False on
     # failure (the signal the channel loop uses to decide reconnect-now vs back-off).
