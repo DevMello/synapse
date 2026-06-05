@@ -158,6 +158,36 @@ async def handle_reconcile(ctx: MessageContext, payload: dict[str, Any]) -> None
         )
 
 
+# Daemon→cloud acknowledgment that it adopted a recovery + its resume plan (§4.12).
+RUN_RECOVER_ACK = "run.recover.ack"
+
+
+@on_daemon_message(RUN_RECOVER_ACK)
+async def handle_recover_ack(ctx: MessageContext, payload: dict[str, Any]) -> None:
+    """Record a daemon's ``run.recover.ack`` — it adopted an interrupted run.
+
+    The daemon replies with its resume plan (disposition + any gated steps). We don't
+    drive the run's lifecycle here — telemetry / checkpoints / ``run.finished`` do that
+    — but we write an audit event so the recovery hand-off is traceable end to end.
+    Org-scoped via ``ctx.org_id``; a missing run_id degrades to a no-op.
+    """
+    run_id = ctx.run_id or payload.get("run_id")
+    if not run_id:
+        return
+    await get_audit().write(
+        ctx.org_id,
+        RUN_RECOVER_ACK,
+        resource_type="run",
+        resource_id=str(run_id),
+        run_id=str(run_id),
+        detail={
+            "daemon_id": ctx.daemon_id,
+            "agent_id": payload.get("agent_id"),
+            "plan": payload.get("plan"),
+        },
+    )
+
+
 # ── REST ─────────────────────────────────────────────────────────────────────
 @router.get("/runs/{run_id}/checkpoints")
 async def list_checkpoints(

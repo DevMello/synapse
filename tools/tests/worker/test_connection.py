@@ -229,3 +229,86 @@ async def test_reconcile_empty_is_defensive(mock_cloud, store, settings):
     async with _running(mock_cloud, store):
         msg = await mock_cloud.wait_for("run.reconcile")
         assert msg["payload"]["runs"] == []
+
+
+async def test_register_sent_on_connect(mock_cloud, store, settings):
+    # §2.3: on connecting the control channel the daemon registers its identity.
+    async with _running(mock_cloud, store):
+        msg = await mock_cloud.wait_for("daemon.register")
+    payload = msg["payload"]
+    # All four identity fields are present; name/platform/version are non-empty.
+    assert set(payload) >= {"name", "tags", "platform", "version"}
+    assert payload["name"]
+    assert payload["version"]
+    assert "-" in payload["platform"]  # "<system>-<machine>"
+    assert isinstance(payload["tags"], list)
+
+
+async def test_register_reports_configured_name_and_tags(mock_cloud, store):
+    # daemon_name / daemon_tags from config are what we report upstream.
+    ks = get_keystore()
+    ks.set(tokens_mod.KEYSTORE_SERVICE, tokens_mod.KEY_ACCESS, "access-1")
+    ks.set(tokens_mod.KEYSTORE_SERVICE, tokens_mod.KEY_REFRESH, "refresh-1")
+    base = mock_cloud.url.replace("ws://", "http://")
+    settings = Settings(
+        worker_env="test",
+        cloud_base_url=base,
+        heartbeat_interval_seconds=1,
+        reconnect_max_seconds=2,
+        verify_tls=False,
+        daemon_name="prod-box-7",
+        daemon_tags="gpu, us-east, beta",
+    )
+    mgr = ConnectionManager(_FakeDaemon(settings=settings, store=store))
+    task = asyncio.create_task(mgr.run())
+    try:
+        msg = await mock_cloud.wait_for("daemon.register")
+    finally:
+        await mgr.stop()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+    assert msg["payload"]["name"] == "prod-box-7"
+    assert msg["payload"]["tags"] == ["gpu", "us-east", "beta"]
+
+
+async def test_handle_token_expiry_signals_refresh_outcome(mock_cloud, store, monkeypatch):
+    # Unit-level: _handle_token_expiry returns True on a successful refresh, False on
+    # failure (the signal the channel loop uses to decide reconnect-now vs back-off).
+    mgr = ConnectionManager(_FakeDaemon(settings=_settings_for(mock_cloud), store=store))
+
+    async def _ok(_settings):
+        return "new-access"
+
+    monkeypatch.setattr(tokens_mod, "refresh", _ok)
+    assert await mgr._handle_token_expiry() is True
+
+    async def _fail(_settings):
+        return None
+
+    monkeypatch.setattr(tokens_mod, "refresh", _fail)
+    assert await mgr._handle_token_expiry() is False
+
+
+async def test_failed_refresh_backs_off_not_hotloops(mock_cloud, store, monkeypatch):
+    # A revoked daemon: the cloud 4401s EVERY handshake and refresh always fails. The
+    # loop must take the backoff path (sleep) instead of `continue`-ing into a hot loop.
+    mock_cloud.reject_all = True
+
+    async def _no_refresh(_settings):
+        return None
+
+    monkeypatch.setattr(tokens_mod, "refresh", _no_refresh)
+
+    sleeps = {"n": 0}
+
+    async def _counting_sleep(self, base):
+        sleeps["n"] += 1
+        await asyncio.sleep(0.01)  # keep the test fast but still yield like real backoff
+
+    monkeypatch.setattr(ConnectionManager, "_sleep_with_jitter", _counting_sleep)
+
+    async with _running(mock_cloud, store):
+        # Backoff must run at least once -> we did NOT skip it via an immediate continue.
+        await _wait(lambda: sleeps["n"] >= 1, timeout=3.0)
+    assert sleeps["n"] >= 1

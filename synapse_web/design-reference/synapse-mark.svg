@@ -1,0 +1,10 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Synapse logo mark">
+  <defs>
+    <linearGradient id="ember" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ef6a2a"></stop>
+      <stop offset="1" stop-color="#d44a14"></stop>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="108" height="108" rx="30" fill="url(#ember)"></rect>
+  <path d="M33 33 H87 V60 H60 V87 H33 Z" fill="#f8f5f0" fill-opacity="0.92"></path>
+</svg>
