@@ -1,11 +1,11 @@
 // Agent Detail — Tools & MCP tab. Agent-tier capability selection (attach/detach
 // from what the host daemon already has), rulesets & blockers, and content
 // filtering / guardrails. Ported from the prototype's ToolsTab (AgentTabs2.jsx).
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon, Chip } from "../../../components/Primitives";
 import { Toggle, Segmented, daemonName, type SegOption } from "../../../components/Common";
-import { data } from "../../../api/queries";
+import { useDaemon, useCapabilityDefs } from "../../../api/queries";
 import { useUI } from "../../../store/ui";
 import { useCurrentAgent } from "../context";
 import type { Capability, Severity } from "../../../types";
@@ -43,19 +43,25 @@ function CapabilitiesPanel() {
   const agent = useCurrentAgent();
   const navigate = useNavigate();
   const showToast = useUI((s) => s.showToast);
-  const daemon = data.daemons.find((d) => d.id === agent.daemonId);
-  const installed: Capability[] = daemon ? daemon.capabilities : [];
+  const { data: daemon } = useDaemon(agent.daemonId);
+  const installed: Capability[] = daemon?.capabilities ?? [];
+  const { data: capDefs = [] } = useCapabilityDefs();
 
   // Local attach/detach selection. Built-in defaults are on; github is attached
-  // by default to mirror the prototype's seeded state.
-  const [attached, setAttached] = useState<Record<string, boolean>>(() => {
+  // by default to mirror the prototype's seeded state. Seeded once the catalog
+  // query resolves (it arrives after first render).
+  const [attached, setAttached] = useState<Record<string, boolean>>({});
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (seeded.current || capDefs.length === 0) return;
     const m: Record<string, boolean> = {};
-    data.CAP_DEFS.forEach((c) => {
+    capDefs.forEach((c) => {
       m[c.id] = c.builtin && c.id !== "fetch" ? true : c.id === "github";
     });
     m.fetch = true;
-    return m;
-  });
+    setAttached(m);
+    seeded.current = true;
+  }, [capDefs]);
 
   return (
     <>
@@ -71,7 +77,7 @@ function CapabilitiesPanel() {
         </span>
       </div>
       <div className="db-cap-list">
-        {data.CAP_DEFS.map((c) => {
+        {capDefs.map((c) => {
           const onHost = installed.find((x) => x.id === c.id);
           const ready = onHost && onHost.state === "ready";
           const installing = onHost && onHost.state === "installing";

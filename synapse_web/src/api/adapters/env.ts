@@ -1,11 +1,18 @@
-// DB row → UI view-model. Worker unit 7 implements; foundation stub throws.
-// secret from env_var_refs.secret; value = secret ? undefined : value_plain;
-// origin 'ui'→"cloud", 'local'→"local"; by/updated from updated_by/updated_at.
+// DB row → UI view-model. NEVER expose secret values: value is set only for
+// non-secret rows (value_plain). origin 'ui'→"cloud", 'local'→"local".
 import type { Database } from "../../lib/database.types";
 import type { EnvVar } from "../../types";
+import { relativeTime } from "../format";
 
 type EnvVarRow = Database["public"]["Tables"]["env_var_refs"]["Row"];
 
-export function toEnvVar(_row: EnvVarRow): EnvVar {
-  throw new Error("toEnvVar not implemented");
+export function toEnvVar(row: EnvVarRow): EnvVar {
+  return {
+    key: row.name,
+    secret: row.secret,
+    value: row.secret ? undefined : row.value_plain ?? undefined,
+    origin: row.origin === "local" ? "local" : "cloud",
+    updated: relativeTime(row.updated_at),
+    by: row.updated_by ?? "—",
+  };
 }

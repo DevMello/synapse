@@ -1,11 +1,22 @@
-// DB row → UI view-model. Worker unit 10 implements; foundation stub throws.
-// label "v<version>"; author from author_user_id (resolve display name); relativeTime
-// (created_at); tags; current = (version === agent.current_version).
+// DB row → UI view-model. label "v<version>"; current = version === currentVersion.
 import type { Database } from "../../lib/database.types";
 import type { Version } from "../../types";
+import { relativeTime } from "../format";
 
 type VersionRow = Database["public"]["Tables"]["agent_versions"]["Row"];
 
-export function toVersion(_row: VersionRow, _currentVersion: number | null): Version {
-  throw new Error("toVersion not implemented");
+export function toVersion(
+  row: VersionRow,
+  currentVersion: number | null,
+  authorName = "—",
+): Version {
+  return {
+    id: `v${row.version}`,
+    label: `v${row.version}`,
+    author: authorName,
+    when: relativeTime(row.created_at),
+    msg: row.message ?? "",
+    tags: row.tags ?? [],
+    current: row.version === currentVersion,
+  };
 }

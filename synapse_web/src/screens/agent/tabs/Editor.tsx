@@ -9,9 +9,9 @@ import CodeMirror from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorView } from "@codemirror/view";
 import { Icon, Button } from "../../../components/Primitives";
-import { Segmented } from "../../../components/Common";
+import { Segmented, daemonName } from "../../../components/Common";
 import { useCurrentAgent } from "../context";
-import { usePrompt, useSkills, data } from "../../../api/queries";
+import { usePrompt, useSkills } from "../../../api/queries";
 import { useUI } from "../../../store/ui";
 import type { Skill } from "../../../types";
 
@@ -88,10 +88,6 @@ function renderMd(src: string): ReactNode[] {
   });
   flush();
   return out;
-}
-
-function daemonName(id: string): string {
-  return data.daemons.find((d) => d.id === id)?.name ?? id;
 }
 
 // CodeMirror theme that blends into the .db-editor-pane chrome.

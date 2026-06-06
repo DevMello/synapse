@@ -1,13 +1,14 @@
 // Synapse Web UI — Agent Detail shell: hero row, enable toggle, run-now, and the
 // tab nav + registry. The shell is foundation-owned and never edited by a worker;
 // each tab's body lives in its own file under ./tabs and is filled in per unit.
-import { Suspense, lazy, useState, type ComponentType, type LazyExoticComponent } from "react";
+import { Suspense, lazy, useEffect, useState, type ComponentType, type LazyExoticComponent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Chip, Icon, Button } from "../../components/Primitives";
 import { AgentAvatar, Toggle, daemonName } from "../../components/Common";
 import { ScreenStub } from "../../components/Common";
 import { useUI } from "../../store/ui";
-import { data } from "../../api/queries";
+import { useAgent } from "../../api/queries";
+import { useAgentRealtime } from "../../api/realtime";
 import { AgentProvider } from "./context";
 
 // Tabs are code-split: the heavy ones (Editor → CodeMirror, Analytics → Recharts,
@@ -46,18 +47,27 @@ export default function AgentDetail() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const showToast = useUI((s) => s.showToast);
-
-  const agent = data.agents.find((x) => x.id === agentId) ?? data.agents[0];
+  const { data: agent } = useAgent(agentId);
+  useAgentRealtime(agentId);
   const tab = params.get("tab") || "overview";
-  const [enabled, setEnabled] = useState(agent.avail);
+  const [enabled, setEnabled] = useState(true);
 
-  function setTab(id: string) {
-    setParams({ tab: id });
+  // Adopt the agent's availability once the query resolves.
+  useEffect(() => {
+    if (agent) setEnabled(agent.avail);
+  }, [agent]);
+
+  if (!agent) {
+    return <div className="db-mono db-muted" style={{ padding: 24 }}>Loading…</div>;
   }
-  function runNow() {
+
+  const setTab = (id: string) => {
+    setParams({ tab: id });
+  };
+  const runNow = () => {
     showToast({ text: `Run queued for ${agent.name}` });
     setTab("runs");
-  }
+  };
 
   const Active = AGENT_TABS.find((t) => t.id === tab)?.Component;
 

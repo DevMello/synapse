@@ -3,8 +3,7 @@
 // Quick-edit panels on the right.
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useCurrentAgent } from "../context";
-import { useRuns } from "../../../api/queries";
-import { data } from "../../../api/queries";
+import { useRuns, useDaemon } from "../../../api/queries";
 import { Icon, Chip } from "../../../components/Primitives";
 import { MetricCard, SectionRow, Link, daemonName } from "../../../components/Common";
 
@@ -15,7 +14,7 @@ export default function OverviewTab() {
   const { data: allRuns } = useRuns();
 
   const recent = (allRuns ?? []).filter((r) => r.agentId === agent.id);
-  const host = data.daemons.find((d) => d.id === agent.daemonId);
+  const { data: host } = useDaemon(agent.daemonId);
 
   const goTab = (tab: string) => setParams({ tab });
 

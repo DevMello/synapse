@@ -1,16 +1,18 @@
-// Agent hooks. Worker unit 3 fills the configured branch.
+// Agent hooks → Supabase agent_overview view.
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { supabase, isSupabaseConfigured } from "../../lib/supabase";
 import * as mock from "../../data/mock";
 import type { Agent } from "../../types";
+import { toAgent } from "../adapters/agents";
 
 export function useAgents(): UseQueryResult<Agent[]> {
   return useQuery({
     queryKey: ["agents"],
     queryFn: async () => {
       if (isSupabaseConfigured && supabase) {
-        // TODO(worker:agents): agent_overview view → toAgent
-        return mock.agents;
+        const { data, error } = await supabase.from("agent_overview").select("*");
+        if (error) throw error;
+        return data.map(toAgent);
       }
       return mock.agents;
     },
@@ -22,8 +24,13 @@ export function useAgent(id: string | undefined): UseQueryResult<Agent | undefin
     queryKey: ["agent", id],
     queryFn: async () => {
       if (isSupabaseConfigured && supabase) {
-        // TODO(worker:agents): agent_overview where id = $id → toAgent
-        return mock.agents.find((a) => a.id === id);
+        const { data, error } = await supabase
+          .from("agent_overview")
+          .select("*")
+          .eq("id", id!)
+          .maybeSingle();
+        if (error) throw error;
+        return data ? toAgent(data) : undefined;
       }
       return mock.agents.find((a) => a.id === id);
     },

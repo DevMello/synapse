@@ -4,6 +4,8 @@ import { useEffect, type CSSProperties, type ReactNode } from "react";
 import { Button, HatchCorners, Icon, Kicker } from "./Primitives";
 import { useUI } from "../store/ui";
 import { data } from "../api/queries";
+import { queryClient } from "../lib/queryClient";
+import type { Daemon } from "../types";
 
 export function PageHead({
   kicker, title, serif, sub, actions,
@@ -131,7 +133,10 @@ export function AgentAvatar({ engine, size = 34 }: { engine: string; size?: numb
 }
 
 export function daemonName(id: string): string {
-  const d = data.daemons.find((x) => x.id === id);
+  // Read the live daemons from the query cache; fall back to the mock snapshot
+  // until the ["daemons"] query has populated.
+  const daemons = queryClient.getQueryData<Daemon[]>(["daemons"]) ?? data.daemons;
+  const d = daemons.find((x) => x.id === id);
   return d ? d.name : id;
 }
 
