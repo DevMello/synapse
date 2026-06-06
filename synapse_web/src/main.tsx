@@ -13,6 +13,7 @@ import "./styles/app.css";
 import "./styles/_tw-utils.css";
 
 import { router } from "./router";
+import { AuthGate } from "./lib/auth";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false } },
@@ -21,7 +22,9 @@ const queryClient = new QueryClient({
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} future={{ v7_startTransition: true }} />
+      <AuthGate>
+        <RouterProvider router={router} future={{ v7_startTransition: true }} />
+      </AuthGate>
     </QueryClientProvider>
   </React.StrictMode>,
 );
