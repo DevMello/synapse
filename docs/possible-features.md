@@ -1280,3 +1280,234 @@ and IdP secrets are **service-role-only** (never readable by `authenticated`).
   the IdP via Supabase Auth, authn-only/authorization-unchanged, viewer-floor JIT,
   DNS-verified domain routing, require-SSO + break-glass, admin-confirmed group→role + immediate
   SCIM deprovision).
+
+---
+
+## 14. Feature 7 — Multi-Factor Authentication (MFA + step-up)
+
+> **SECURITY hardening — sibling of §13, not a duplicate.** §13 (SSO) federates *who proves
+> identity* to an external IdP; this strengthens the proof itself with a **second factor**, and
+> adds **step-up** — re-proving identity at the moment a high-blast-radius action is taken. Like
+> SSO it **changes authentication, never authorization** (the membership/role model + RLS from
+> Members & RBAC stay the floor). Off by default, **owner-only** to enforce, scoped per org. The
+> governing rule:
+>
+> > **A second factor raises *authentication assurance*, never *authority*.** MFA decides how
+> > confident we are that the session is really the user; it can **gate** a sensitive action
+> > behind a fresh proof, but it can never **grant** a permission the user's role lacks.
+
+### 14.1 Why this exists & what it builds on
+
+Today a human authenticates with **Supabase Auth email/password** behind the Web UI's
+**`AuthGate`**; SSO (§13) optionally federates that to an org IdP. MFA closes the remaining gap:
+a stolen password (or a phished SSO session) shouldn't be enough — and the platform's
+**highest-blast-radius actions** (minting an agent orchestration grant §2, delegating approval
+§3, viewing/rotating secrets §4.8/Environment, approving a destructive tool §12, transferring
+ownership, enabling experimental features, changing SSO/MFA policy) deserve a *fresh* proof,
+not just a session that logged in hours ago.
+
+This reuses **Supabase Auth's native MFA** (TOTP + WebAuthn) and its **AAL** (Authenticator
+Assurance Level) model rather than building a bespoke TOTP/WebAuthn server, and it dovetails
+with §13: SSO users get MFA from their IdP; password/local and **break-glass** accounts get it
+here. It also gives the rest of this document a single, reusable **"sensitive action ⇒ require
+recent MFA"** primitive.
+
+### 14.2 Locked design decisions
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| M1 | **Reuse Supabase Auth MFA** (TOTP authenticator apps + **WebAuthn/passkeys**); never hand-roll TOTP/WebAuthn verification. | Inherits vetted enrollment/verification + the **AAL** model; smallest new attack surface; consistent with §13 reusing Supabase Auth SSO. |
+| M2 | **MFA strengthens authentication; it never authorizes.** A satisfied factor can *gate* an action, never *grant* one — authorization stays `memberships.role` + RLS. | Same trust boundary as §13 S2: a bypassed/forged factor degrades to *blocked* (annoying), never *escalated* (catastrophic). |
+| M3 | **AAL-based step-up for high-blast-radius actions.** Sensitive actions require a **fresh AAL2** assertion ("MFA within the last *N* minutes"), not merely "MFA is enrolled." One shared, ordered **sensitive-action list** drives it (§14.4). | "Logged in this morning" ≠ "authorizing a destructive op now." Recency is the property that makes step-up meaningful; one list keeps it consistent across §2/§3/§4/§12/§13. |
+| M4 | **SSO users' MFA is delegated to the IdP; don't double-prompt.** Org MFA enforcement applies to **password/local + break-glass** accounts. Step-up may still require a fresh IdP re-auth (`prompt=login`/`acr`) for SSO users. | Enterprises enforce MFA centrally; double-prompting is friction users route around. But step-up recency still applies — via the IdP for SSO users, via Supabase MFA for local. |
+| M5 | **≥2 factors + recovery codes; break-glass owners MUST have MFA.** Enrollment encourages a backup factor and issues one-time **recovery codes**; the §13 break-glass owner exemption from SSO is **tightened** to *password + mandatory MFA*. | Avoids self-lockout (lost-phone) and ensures the SSO-outage escape hatch isn't a single-factor backdoor. |
+| M6 | **Enforcement is per-org, owner-only, with an enrollment grace window.** Turning on "require MFA" starts a configurable grace period in which un-enrolled users are prompted to enroll before being blocked. | Flipping require-MFA must not lock out a whole org mid-rollout; the grace window makes it a safe, staged change. |
+
+### 14.3 Factors supported
+
+| Factor | Status | Notes |
+|--------|--------|-------|
+| **TOTP** (authenticator app) | primary | Supabase Auth native; QR enroll + 6-digit verify; the broad-compatibility default. |
+| **WebAuthn / passkeys** (platform + roaming) | recommended | Phishing-resistant; strongest factor; offered first where supported. |
+| **Recovery codes** | required backup | One-time codes issued at enrollment (shown once), for lost-factor recovery (M5). |
+| **SMS / phone** | **discouraged / optional** | SIM-swap-weak; available only if an org explicitly opts in; never counts as the *strong* factor for step-up if a stronger one exists. |
+
+A user may enroll **multiple factors**; the strongest satisfied factor sets the session AAL.
+
+### 14.4 AAL & the step-up mechanic (the key piece)
+
+Supabase Auth sessions carry an **AAL**: `aal1` = single factor (password/SSO), `aal2` = a
+verified second factor. Synapse adds **recency**: a sensitive action requires AAL2 **asserted
+within a freshness window** (`step_up_max_age`, e.g. 10 min), else it triggers a **step-up
+challenge**.
+
+```
+User (session: aal1, or aal2 asserted 40 min ago) triggers a SENSITIVE action
+  e.g. "Mint orchestration grant" (§2) / "Reveal env value" (§4.8) / "Approve delete_database" (§12)
+  ▼
+Synapse step-up gate:
+  │  is session AAL2 AND last_mfa_at within step_up_max_age?
+  │     YES → proceed
+  │     NO  → STEP-UP CHALLENGE
+  ▼
+  local/password user → Supabase MFA challenge (TOTP code / passkey)   ── verify ──►
+  SSO user            → IdP re-auth (prompt=login / acr=mfa) via §13    ── verify ──►
+  ▼
+  session upgraded to fresh AAL2 (last_mfa_at = now) → action proceeds; audit: step_up_satisfied
+```
+
+**The single sensitive-action list** (shared across features; ordered by blast radius):
+
+| Action | Source | Default requirement |
+|--------|--------|--------------------|
+| Reveal / rotate a secret (env var) | §4.8 / Environment | fresh AAL2 |
+| Approve a destructive-class tool call | §12 (Pillar B) | fresh AAL2 |
+| Mint an agent **orchestration grant** | §2.3 | fresh AAL2 |
+| Create an **approval delegation** | §3.2 | fresh AAL2 |
+| Resolve a high-severity HITL request | §4 HITL | fresh AAL2 (org-tunable) |
+| Transfer org **ownership** | Members & RBAC | fresh AAL2 (always) |
+| Change **SSO / MFA / security** policy | §13 / §14 | fresh AAL2 (always) |
+| Enable an **experimental feature** | §4 cross-cutting | fresh AAL2 |
+
+The list is the same artifact §13.13 referenced for "per-action SSO step-up" — MFA and SSO
+both feed it; an org sets which entries require step-up (a deterministic floor: ownership and
+security-policy changes are **always** step-up and not downgradable).
+
+### 14.5 Enrollment & enforcement (M6)
+
+- **Self-service enrollment** on the per-user **Account security** page: add TOTP/passkey,
+  download recovery codes, name/remove factors (removing the last factor is blocked while the
+  org requires MFA).
+- **Org enforcement** (owner-only): `require_mfa` per org, with an **enrollment grace window** —
+  during grace, un-enrolled users on login see a *"set up MFA to keep access"* interstitial;
+  after grace, login without an enrolled factor is blocked (sent to enrollment). Step-up is
+  independent of full enforcement (you can require step-up for sensitive actions even before
+  org-wide enforcement).
+- **Break-glass tightening (M5):** §13's break-glass owner accounts (password-capable under
+  `enforce_sso`) **must** have MFA enrolled; a break-glass login is `aal2`-required and
+  audited/alerted.
+
+### 14.6 Relationship with SSO (§13) — who enforces what
+
+| User type | Second factor enforced by | Step-up mechanism |
+|-----------|---------------------------|-------------------|
+| Password / local account | **Synapse** (Supabase Auth MFA, M1) | Supabase MFA challenge |
+| SSO (SAML/OIDC) user | **the org IdP** (don't double-prompt, M4) | IdP re-auth (`prompt=login` / `acr`) via §13 |
+| Break-glass owner | **Synapse** (mandatory, M5) | Supabase MFA challenge |
+
+`org_security_policy.require_mfa` governs local accounts; for SSO orgs the expectation is the
+IdP already mandates MFA, so Synapse's enforcement targets the non-SSO surface and break-glass.
+Step-up recency applies to **all** user types — just satisfied through the appropriate channel.
+
+### 14.7 Recovery & lockout
+
+- **Recovery codes** (M5) recover a lost single factor.
+- **Admin-assisted reset** — an org **owner/admin** can reset another member's MFA enrollment
+  (forcing re-enrollment on next login); the reset is **itself a step-up + audited** action, and
+  an admin **cannot** reset an owner's MFA (only an owner can, preventing privilege capture).
+- **Org-level escape hatch** — losing *all* owners' factors falls back to Supabase project-level
+  recovery (service-role, out-of-band) — the deliberate last resort, audited.
+
+### 14.8 Trust model & layering
+
+| Layer | Question it answers | Changes here? |
+|-------|--------------------|---------------|
+| AuthGate / Supabase Auth (+ §13 SSO) | Is there a session, and who is the user? | session now carries an **AAL** + `last_mfa_at` |
+| **§14 MFA / step-up** | Is the proof **strong enough and recent enough** for *this* action? | **new** — gate only; AAL2-fresh or challenge |
+| `memberships` + RLS (Members & RBAC) | What may this user do? | **unchanged** — sole authorization source |
+
+MFA/step-up can only **add a challenge** in front of an action the user is *already* authorized
+for; it never writes a policy, never grants a role, never bypasses RLS — the same friction-only
+property as §12 (G2) and §13 (S2).
+
+### 14.9 Data model
+
+| Table | Change |
+|-------|--------|
+| **`auth.mfa_factors`** (Supabase) | **reused** — enrolled TOTP/WebAuthn factors per user; we read status, never store secrets ourselves. |
+| **`org_security_policy`** | **new** — per-org `require_mfa`, `mfa_grace_until`, `step_up_max_age`, `step_up_actions[]` (which entries of §14.4 require step-up), `allow_sms` (M4/M6). Owner-only writes (RLS). |
+| **`recovery_codes`** | **new** — **hashed** one-time recovery codes per user, `used_at` (M5). Service-role/self-only. |
+| `users` | += `mfa_enrolled` (bool, denormalized for display), `auth_source` (reused from §13). |
+| `memberships` | += `break_glass` (reused from §13) — now implies a mandatory-MFA account. |
+| Session / JWT | carries **`aal`** + **`last_mfa_at`** (from Supabase Auth) — read by the step-up gate; not a new table. |
+| `audit_events` | new kinds: `mfa_enrolled`, `mfa_removed`, `mfa_factor_reset`, `step_up_challenged`, `step_up_satisfied`, `step_up_failed`, `recovery_code_used`, `mfa_policy_changed`. |
+
+Org-scoped tables are **RLS-scoped by `org_id`**; recovery codes and factor secrets are
+**never** readable by `authenticated` (Supabase manages factor secrets; recovery codes are
+hashed, self/service-role only).
+
+### 14.10 New surface
+
+| Surface | Purpose |
+|---------|---------|
+| Supabase Auth MFA (enroll / challenge / verify) | TOTP + WebAuthn enrollment and verification (reused, not built) |
+| **Step-up gate** (Web UI + cloud check) | before a §14.4 action: assert fresh AAL2, else challenge — the one shared primitive |
+| Recovery-code issue / verify | hashed one-time codes (M5) |
+| Admin MFA-reset endpoint | owner/admin resets a member's factor (step-up + audited, §14.7) |
+| `org_security_policy` read | the AuthGate/UI reads `require_mfa` + `step_up_*` to decide enforcement and which actions gate |
+
+No new daemon/transport primitive — step-up is a cloud + Web UI authentication concern; the
+daemon's enforcement model is unchanged (MFA gates the *human* action that issues a command,
+not the daemon's execution of it).
+
+### 14.11 Web UI
+
+- **AuthGate** — after primary auth, if the org requires MFA and the user is enrolled, present
+  the **MFA challenge** (passkey/TOTP); during the grace window, an *enroll-now* interstitial
+  (M6). SSO users are not double-prompted (M4). (`synapse_web/src/lib/auth.tsx`.)
+- **Account security** (per-user, new page off the avatar menu): enrolled factors (add passkey /
+  TOTP, name/remove), **recovery codes** (generate/download/regenerate), recent step-up events.
+- **Settings → Authentication** (the §13 owner-only sub-tab, extended): **Require MFA** toggle +
+  grace window, **step-up policy** (which §14.4 actions require a fresh factor, with the always-on
+  entries locked), `allow_sms`, and a roster column showing each member's **MFA-enrolled** status
+  (and **break-glass** badge, M5).
+- **Step-up modal** — a consistent "Confirm it's you" dialog reused everywhere in §14.4 (reveal
+  secret, approve destructive call, mint grant/delegation, transfer ownership…), showing *what*
+  is being authorized.
+
+### 14.12 Risk notes
+
+| Concern | Mitigation |
+|---------|------------|
+| Stolen password / phished session acts freely | **require_mfa** (M6) + **step-up** (M3) — sensitive actions demand a fresh second factor even on a valid session |
+| MFA bypass/forgery escalates privilege | **M2** — MFA gates, never grants; a bypass degrades to *blocked*, never *escalated*; authorization stays RLS |
+| User locks themselves out (lost phone) | **recovery codes** + admin-assisted reset (owner can't be reset by admin) + project-level last resort (§14.7) |
+| Double-prompt friction pushes users to disable MFA | **M4** — SSO users' factor is the IdP's; Synapse doesn't re-challenge enrolled-elsewhere users except for step-up |
+| Flipping require-MFA locks out an org | **M6 grace window** — staged enrollment before blocking |
+| SMS SIM-swap | **discouraged/opt-in only** (M4 table); never the strong factor for step-up when a passkey/TOTP exists |
+| Step-up fatigue (challenged too often) | tunable `step_up_max_age` + per-org `step_up_actions[]`; only high-blast-radius entries gate by default; passkeys make re-proof low-friction |
+| Break-glass becomes a single-factor backdoor | **M5** — break-glass owners must have MFA; their logins are aal2-required + alerted |
+
+### 14.13 Open questions / future
+
+- **Risk-adaptive step-up** — vary `step_up_max_age` by signal (new device/IP, anomaly score
+  from the §12/§4.5 detectors) instead of a fixed window.
+- **Device-bound sessions / passkey as primary** — passwordless login (passkey = both factors)
+  for local accounts, narrowing the password surface entirely.
+- **MFA on the TUI device-login flow** — require a fresh factor when approving a new daemon
+  device-code ([integration.md](integration.md)), pairing with §13.13's SSO-for-device-login.
+- **Hardware-token attestation tiers** — distinguish platform vs roaming vs attested-hardware
+  keys for the most sensitive step-up entries.
+- **Delegated step-up for agents (interaction with §2/§3)** — explicitly *no*: an agent grant is
+  *minted* behind human step-up (§14.4), but an agent can never satisfy a step-up itself.
+
+### 14.14 Promotion checklist — where this lands when graduated
+
+- **[cloud-backend.md](cloud-backend.md)** — `org_security_policy` + `recovery_codes` + the
+  `users`/`memberships`/`audit_events` deltas (§14.9); the **step-up gate** check (assert fresh
+  AAL2 server-side for §14.4 actions); admin MFA-reset endpoint; require-MFA + grace enforcement;
+  AAL/`last_mfa_at` read from the session.
+- **[web-ui.md](web-ui.md)** — the AuthGate MFA challenge + enroll-now interstitial; the per-user
+  **Account security** page (factors + recovery codes); the **step-up modal** reused across §14.4
+  surfaces; the **Settings → Authentication** require-MFA + step-up-policy controls and the
+  member MFA-status roster.
+- **[integration.md](integration.md)** — a walkthrough (enroll factor → require-MFA grace → login
+  challenge → reveal-secret triggers step-up → admin resets a lost factor); a
+  responsibility-matrix row (Supabase Auth verifies the factor / Synapse gates the action); note
+  step-up is reused by §2/§3/§4/§12/§13.
+- **[tui-daemon.md](tui-daemon.md)** — only if MFA on device-login is adopted (§14.13); otherwise
+  unaffected (MFA gates the human action, not daemon execution).
+- **`.claude/memory/project_overview.md`** — the MFA/step-up model + decisions M1–M6 (reuse
+  Supabase Auth MFA, authn-strength-only/authorization-unchanged, AAL-recency step-up driven by
+  one sensitive-action list, IdP-delegated MFA for SSO users, recovery-codes + mandatory
+  break-glass MFA, owner-only enforcement with a grace window).
