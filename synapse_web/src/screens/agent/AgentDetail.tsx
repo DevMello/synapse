@@ -7,7 +7,7 @@ import { Chip, Icon, Button } from "../../components/Primitives";
 import { AgentAvatar, Toggle, daemonName } from "../../components/Common";
 import { ScreenStub } from "../../components/Common";
 import { useUI } from "../../store/ui";
-import { useAgent } from "../../api/queries";
+import { useAgent, useDaemons } from "../../api/queries";
 import { useAgentRealtime } from "../../api/realtime";
 import { AgentProvider } from "./context";
 
@@ -48,6 +48,7 @@ export default function AgentDetail() {
   const [params, setParams] = useSearchParams();
   const showToast = useUI((s) => s.showToast);
   const { data: agent } = useAgent(agentId);
+  useDaemons(); // warm the ["daemons"] cache so daemonName() resolves on deep-link
   useAgentRealtime(agentId);
   const tab = params.get("tab") || "overview";
   const [enabled, setEnabled] = useState(true);

@@ -11,7 +11,7 @@ alter table env_var_refs
   drop constraint if exists env_var_plain_only_when_not_secret;
 alter table env_var_refs
   add constraint env_var_plain_only_when_not_secret
-  check (secret or value_plain is null);
+  check (not secret or value_plain is null);
 
 -- ── HITL severity (Approvals queue) ──────────────────────────────────────────
 do $$ begin
