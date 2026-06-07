@@ -657,6 +657,7 @@ async: handoff audit event + lineage → cloud (control channel); telemetry → 
 | H4 | **Context payload is bounded + redacted.** The A→B payload is size-capped, structured, and passed through §4.5 **Layer A** before it leaves A. | The payload is the one new data path; redacting it on-device keeps the on-device-redaction invariant intact and caps blast radius if A is compromised. |
 | H5 | **The unified Trace ID is the existing `root_run_id`.** No new tracing primitive. | §2 already extends `runs` with `root_run_id`/`parent_run_id`/`depth`; a chain is just a linear lineage under one root. Reuse buys the trace view for free. |
 | H6 | **Authz = local-enforce + async audit** (inherits §1.2 **D3**); enforcement is the **daemon**, not the model. | A successful injection still can't hand off along an edge the grant doesn't contain; the cloud keeps revoke + the kill switch. Works through a network blip. |
+| H7 | **Authored on a visual flow canvas; branching = conditional *routing* (exactly one successor at a time), never concurrent fan-out.** Drawing several out-edges from a node defines a runtime **router** that selects **one** successor; true parallel fan-out stays §2 Orchestration. | Delivers the n8n-style drag-and-drop authoring experience without crossing the line that separates handoff (MEDIUM) from orchestration (HIGH): the baton still advances one hop at a time, and every branch target is still a human-pre-approved edge (H3). |
 
 ### 11.3 Handoff vs. orchestration — when to use which
 
@@ -698,11 +699,14 @@ Provisioned through the normal **two-tier capability model**
   "grant_id": "chn_…",
   "daemon_id": "dmn_macbook01",          // H2: same-daemon only
   "granted_by": "usr_…",                 // grant ⊆ this human's authority
-  "edges": [                             // H3: the ONLY handoffs allowed
-    { "from": "agt_planner",  "to": "agt_critic"   },
-    { "from": "agt_critic",   "to": "agt_planner"  },   // return-loop edge
-    { "from": "agt_critic",   "to": "agt_executor" }
+  "edges": [                             // H3: the ONLY handoffs allowed.
+                                         // H7: several out-edges from one node = a runtime
+                                         // ROUTER — exactly one is taken per hop, never both.
+    { "from": "agt_planner", "to": "agt_critic"   },
+    { "from": "agt_critic",  "to": "agt_planner",  "when": "needs_revision" }, // loop branch
+    { "from": "agt_critic",  "to": "agt_executor", "when": "approved" }        // router branch
   ],
+  "routing": "first_match",              // H7: evaluate conditions in order, take ONE edge
   "max_hops": 8,                         // total handoffs along the chain (loop guard)
   "chain_budget_usd": 5.00,              // shared across the WHOLE chain
   "max_payload_bytes": 32768,            // H4: bounded context transfer
@@ -763,6 +767,8 @@ round-trip), mirroring §2.4:
 | Infinite ping-pong (A▸B▸A▸B…) | **`max_hops`** ceiling on total handoffs (cycles are *allowed* for Critic loops but **bounded**) |
 | Runaway cost along the chain | shared **`chain_budget_usd`** enforced against the root run's accumulated cost; per-run `max_cost_usd` still applies to each hop |
 | Injection re-routes work to a high-trust agent | **H3** — handoff only along edges in the human-signed graph; an off-graph target is simply not callable |
+| Injection makes a **router** take the wrong *allowed* branch (H7) | every branch target is **already a human-pre-approved edge** — the worst case is routing to another *vetted* successor (which runs under its own ruleset), never an off-graph or higher-authority agent; routing conditions are evaluated over **structured, redacted** signals, not raw model free-text |
+| Author draws true **concurrent fan-out** (1→many in parallel) | the canvas **rejects** it as out-of-envelope for handoff and offers an in-place **"promote to §2 Orchestration grant"** (the correct, higher-risk home) — fan-out can't be smuggled into a chain grant |
 | Sensitive data leaking A→B | **H4** Layer-A redaction of the envelope + `max_payload_bytes` cap; no credential inheritance |
 | Runaway chain in flight | the §2 **`orchestration.halt { root_run_id }`** kill switch cancels the root + all downstream hops (shared lineage); anomaly detector trips on handoff-rate spikes |
 | `production` agents pulled into a chain | production-tagged agents **cannot** be chain edges (source or target) by default (inherits §4 production-exclusion) |
@@ -771,8 +777,9 @@ round-trip), mirroring §2.4:
 
 | Table | Change |
 |-------|--------|
-| **`agent_chain_grants`** | **new** — the signed edge-graph grant in §11.4 (also cached on the daemon) |
-| `runs` | **reuses** §2's `root_run_id` / `parent_run_id` / `depth` / `initiator` / `initiator_agent_id`; += `hop`, `handoff_mode` (`tail`/`return`) |
+| **`agent_flows`** | **new** — the **editable visual design** authored on the canvas: `nodes` (agent refs + positions), `edges` (from/to + `mode` + payload `mapping` + `when` condition + `routing`), `name`, `version`, `status` (`draft`/`published`). The flow is **UX**; on publish it **compiles into a signed `agent_chain_grants`** (the enforced security artifact). Org-scoped (RLS). |
+| **`agent_chain_grants`** | **new** — the signed edge-graph grant in §11.4 (also cached on the daemon), compiled from the published `agent_flows` design |
+| `runs` | **reuses** §2's `root_run_id` / `parent_run_id` / `depth` / `initiator` / `initiator_agent_id`; += `hop`, `handoff_mode` (`tail`/`return`), `flow_id` (which design produced the chain) |
 | `audit_events` | new kind: **`handoff`** (`from`, `to`, `hop`, `root_run_id`, `payload_hash`) |
 | `agent_identities` | **reuses** §2's agent machine identity (no new table) |
 
@@ -788,17 +795,61 @@ checkpoint tables are unchanged (the same cheapness as §10).
   chain grant; `orchestration.halt { root_run_id }` **(reused)** cancels a chain. *No new
   downstream verbs* — handoff intentionally rides §2's revoke + kill switch.
 
-### 11.11 Web UI
+### 11.11 Web UI — the visual Flow Canvas (n8n-style)
 
-- **Chain builder** — a human composes the allowed **edge graph** (drag agents, draw
-  `from → to` edges), sets `max_hops` / `chain_budget` / `max_payload_bytes`, and signs it as
-  a chain grant via the elevated-grant consent flow (shared with §2).
-- **Unified trace view** — a chained run renders as **one expandable trace** under its
-  `root_run_id`: a linear (or looped) **planner ▸ critic ▸ executor** ribbon, each hop
-  expandable to its own telemetry, with the **redacted handoff envelope** + payload hash shown
-  on each edge.
-- **Live status** — the active hop is highlighted; **halt chain** (kill switch) and **revoke
-  grant** are one click.
+The chain grant is authored on a **drag-and-drop flow canvas** — the same node-graph
+metaphor as n8n / Zapier / ComfyUI, specialized for agent handoffs. You wire **one agent's
+output into the next agent's input**, branch with routers, and edit/version multiple flows;
+on publish the canvas **compiles into the signed chain grant** (§11.4) the daemon enforces.
+
+**Canvas mechanics**
+
+- **Node palette → canvas.** Drag **agent nodes** (each shows the agent's avatar/engine and
+  its daemon) from a sidebar onto an infinite, pan/zoom canvas. Plus a few structural nodes:
+  **Start** (the trigger that seeds the first agent), **Router/Switch** (conditional branch —
+  §11.4 `when`), **Return** (a §11.3 return-handoff/critic-loop marker), and **End**.
+- **Wire output → input.** Drag from a node's **output port** to another node's **input port**
+  to create a handoff **edge** (`from → to`). This is the literal "take the output of one
+  agent and direct it into the next." Edges snap, reroute, and can be deleted.
+- **"Direct into 2…" = a Router, not a fork (H7).** Pulling **two edges out of one node**
+  creates a **conditional router**: at runtime exactly **one** branch is taken (e.g. *critic →
+  executor if `approved`, else → back to planner*). It looks like an n8n Switch and gives you
+  multi-target flows while staying one-baton-at-a-time. Drawing **true parallel fan-out**
+  (two successors meant to run *concurrently*) is flagged inline as out-of-scope for handoff,
+  with a one-click **"promote to §2 Orchestration grant"** (§11.8) — fan-out can't be smuggled
+  into a chain.
+- **Per-edge config panel.** Click an edge to set its **mode** (`tail` vs `return`), the
+  **payload mapping** (an n8n-style field mapper: which of A's output fields become B's
+  `task` / `artifacts` / `summary`, within `max_payload_bytes`), the **`when` condition** for
+  router branches, and a **redaction preview** showing exactly what Layer A (§11.5) will strip
+  before the envelope leaves A.
+
+**Multiple flows, editing & reuse**
+
+- **Flow library** — save named flows (`agent_flows`), duplicate, **version**, archive, and
+  **"+ New flow."** Start from a blank canvas or a **template** (e.g. *Planner ▸ Critic ▸
+  Executor*, *Draft ▸ Review-loop ▸ Publish*).
+- **Live validation while you draw** — the canvas enforces the §11 envelope as a build-time
+  guardrail: all nodes on **one daemon** (H2); **no `production`-tagged agents** as nodes
+  (§4 exclusion); **no concurrent fan-out** (H7 → promote to §2); cycles allowed but **bounded
+  by `max_hops`**; off-graph targets impossible by construction (you can only wire to a node on
+  the canvas). Invalid graphs can't be published; problems are highlighted on the offending
+  node/edge.
+- **Grant limits as canvas properties** — `max_hops`, `chain_budget_usd`, `max_payload_bytes`,
+  and allowed `modes` are set in a flow-settings panel.
+
+**Test, publish, run**
+
+- **Dry-run in draft mode** — "Test flow" executes the chain with the §10 **draft-mode shim**
+  (side effects simulated, HITL recorded-not-paged) so you can watch the baton move and inspect
+  per-hop telemetry **before** signing anything real.
+- **Publish = sign the chain grant** — publishing compiles the canvas into the signed
+  `agent_chain_grants` via the **elevated-grant consent flow** (shared with §2); the
+  `agent_flows` design stays editable, the grant is the immutable enforced subset.
+- **Unified trace, on the same canvas.** A running chain lights up **node-by-node** on the
+  flow graph under one `root_run_id` — the active hop pulses, completed hops show their
+  (redacted) handoff envelope + payload hash on the edge, each node expands to its own
+  telemetry. **Halt chain** (kill switch) and **revoke grant** are one click from the canvas.
 
 ### 11.12 Risk notes (medium)
 
@@ -820,23 +871,35 @@ checkpoint tables are unchanged (the same cheapness as §10).
 - **Handoff SLAs / timeouts** — auto-fail a hop that stalls, with a fallback edge.
 - **Merge/join semantics** — a chain stays linear in v1; fan-in (multiple predecessors into
   one successor) is orchestration territory (§2), not handoff.
+- **One canvas for both handoff *and* orchestration** — let the same flow editor author §2
+  trees and §11 chains, showing the **risk tier live** as the topology changes (a fan-out edge
+  flips the grant type from chain → orchestration) instead of two separate builders.
+- **Field-mapping expression editor** — a richer n8n-style expression language for the per-edge
+  payload mapping (A.output → B.envelope), evaluated within the redaction + size constraints.
+- **Reusable sub-flows** — collapse a vetted chain segment into a single reusable node, with its
+  own pinned sub-grant.
 
 ### 11.14 Promotion checklist — where this lands when graduated
 
 - **[tui-daemon.md](tui-daemon.md)** — Agent Runtime gains the **handoff broker** + the
   `handoff` capability/MCP tools; add `agent.handoff` to the §4.2 command router; note the
   WAL lineage row + Layer-A envelope redaction (§4.5).
-- **[cloud-backend.md](cloud-backend.md)** — §4 data model: `agent_chain_grants` + the `runs`
-  `hop`/`handoff_mode` columns + the `handoff` audit kind; reuse of `root_run_id` aggregation;
-  chain-grant mint/revoke; daemon-local + production-exclusion gating.
-- **[integration.md](integration.md)** — a walkthrough (build chain grant → planner hands off
-  to critic → critic returns → executor); a responsibility-matrix row; the `agent.handoff`
-  upstream entry + reuse of `grant.revoke` / `orchestration.halt` downstream.
-- **[web-ui.md](web-ui.md)** — the chain builder (edge graph + limits + consent) and the
-  unified-trace chain view (per-hop expand + redacted envelope).
-- **`.claude/memory/project_overview.md`** — the handoff model + decisions H1–H6 (subset of
+- **[cloud-backend.md](cloud-backend.md)** — §4 data model: `agent_flows` (the editable design)
+  + `agent_chain_grants` (compiled from it) + the `runs` `hop`/`handoff_mode`/`flow_id` columns +
+  the `handoff` audit kind; reuse of `root_run_id` aggregation; flow→grant compile + chain-grant
+  mint/revoke; daemon-local + production-exclusion gating.
+- **[integration.md](integration.md)** — a walkthrough (author a flow on the canvas → publish/sign
+  the chain grant → planner hands off to critic → critic routes to executor → done); a
+  responsibility-matrix row; the `agent.handoff` upstream entry + reuse of `grant.revoke` /
+  `orchestration.halt` downstream.
+- **[web-ui.md](web-ui.md)** — the **visual Flow Canvas** (drag agent nodes, wire output→input,
+  conditional routers, per-edge mode/payload-mapping/condition, flow library + versions,
+  build-time validation, draft-mode test, publish-to-sign) and the unified-trace view rendered
+  **on the same canvas** (per-hop expand + redacted envelope + halt/revoke).
+- **`.claude/memory/project_overview.md`** — the handoff model + decisions H1–H7 (subset of
   orchestration, daemon-local, pre-approved edge graph, bounded+redacted payload, reuse
-  `root_run_id` as the unified trace, local-enforce).
+  `root_run_id` as the unified trace, local-enforce, **visual flow canvas with conditional
+  routing not concurrent fan-out**).
 
 ---
 
