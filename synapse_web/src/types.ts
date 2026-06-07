@@ -188,3 +188,18 @@ export interface Member {
   active: string; // relative "joined" time, or "invited" for a pending invitation
   pending?: boolean; // true = an unaccepted org_invitations row, not yet a member
 }
+
+// Team / business-unit hierarchy within an org (teams self-nest via parentId).
+export interface TeamMemberLite {
+  userId: string;
+  name: string;
+  init: string;
+}
+
+export interface TeamNode {
+  id: string;
+  name: string;
+  parentId: string | null;
+  members: TeamMemberLite[];
+  children: TeamNode[];
+}

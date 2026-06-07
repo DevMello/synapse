@@ -8,11 +8,12 @@ import { PageHead, Segmented, ConfirmDialog, MetricCard, SectionRow } from "../c
 import { Button, Icon } from "../components/Primitives";
 import {
   useOrg, useMembers, useInvitations, useInviteMember, useUpdateMemberRole, useRemoveMember, useRevokeInvitation,
+  useTeams, useCreateTeam, useDeleteTeam, useAddTeamMember, useRemoveTeamMember,
 } from "../api/queries";
 import { useUI } from "../store/ui";
-import type { Member, Role } from "../types";
+import type { Member, Role, TeamNode } from "../types";
 
-type SubTab = "profile" | "members" | "billing" | "tokens";
+type SubTab = "profile" | "members" | "teams" | "billing" | "tokens";
 
 // What each role is permitted to do — surfaced as RBAC copy so operators
 // understand exactly what an invite grants.
@@ -48,6 +49,7 @@ export default function Settings() {
         {([
           ["profile", "Org profile"],
           ["members", "Members & RBAC"],
+          ["teams", "Teams"],
           ["billing", "Billing & usage"],
           ["tokens", "API tokens"],
         ] as [SubTab, string][]).map(([id, label]) => (
@@ -63,6 +65,7 @@ export default function Settings() {
 
       {sub === "profile" && <ProfileTab />}
       {sub === "members" && <MembersTab showToast={showToast} />}
+      {sub === "teams" && <TeamsTab showToast={showToast} />}
       {sub === "billing" && <BillingTab />}
       {sub === "tokens" && <TokensTab showToast={showToast} />}
     </>
@@ -287,6 +290,134 @@ function MembersTab({ showToast }: { showToast: (m: { text: string; variant?: "o
             </div>
           ))}
         </div>
+      </div>
+    </>
+  );
+}
+
+// ── Teams / business units ───────────────────────────────────────────────────
+function flattenTeams(nodes: TeamNode[], depth = 0): { node: TeamNode; depth: number }[] {
+  return nodes.flatMap((n) => [{ node: n, depth }, ...flattenTeams(n.children, depth + 1)]);
+}
+
+function TeamsTab({ showToast }: { showToast: (m: { text: string; variant?: "ok" | "warn" }) => void }) {
+  const { data: tree = [] } = useTeams();
+  const { data: members = [] } = useMembers();
+  const createMut = useCreateTeam();
+  const deleteMut = useDeleteTeam();
+  const addMut = useAddTeamMember();
+  const removeMut = useRemoveTeamMember();
+  const [name, setName] = useState("");
+  const [parentId, setParentId] = useState("");
+
+  const flat = flattenTeams(tree);
+  const assignable = members.filter((m) => !m.pending);
+
+  function create() {
+    const n = name.trim();
+    if (!n) { showToast({ text: "Name the team first", variant: "warn" }); return; }
+    setName("");
+    createMut.mutate(
+      { name: n, parentId: parentId || null },
+      {
+        onSuccess: () => showToast({ text: `Team "${n}" created` }),
+        onError: (e) => showToast({ text: (e as Error).message, variant: "warn" }),
+      },
+    );
+  }
+  function del(t: TeamNode) {
+    deleteMut.mutate(
+      { teamId: t.id },
+      {
+        onSuccess: () => showToast({ text: `Team "${t.name}" deleted`, variant: "warn" }),
+        onError: (e) => showToast({ text: (e as Error).message, variant: "warn" }),
+      },
+    );
+  }
+  function addMember(teamId: string, userId: string) {
+    if (!userId) return;
+    addMut.mutate({ teamId, userId }, { onError: (e) => showToast({ text: (e as Error).message, variant: "warn" }) });
+  }
+  function removeMember(teamId: string, userId: string) {
+    removeMut.mutate({ teamId, userId }, { onError: (e) => showToast({ text: (e as Error).message, variant: "warn" }) });
+  }
+
+  return (
+    <>
+      <div className="db-callout">
+        <Icon name="git-branch" size={16} />
+        <span>
+          <b>Org structure.</b> Group members into teams and business units. Teams nest — a
+          parent team contains sub-teams. This organizes people; data access stays governed by
+          roles in <b>Members &amp; RBAC</b>.
+        </span>
+      </div>
+
+      <div className="db-toolbar">
+        <div className="db-toolbar-r" style={{ marginLeft: 0 }}>
+          <input
+            className="db-input"
+            style={{ marginBottom: 0, width: 200 }}
+            placeholder="new team name…"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") create(); }}
+          />
+          <select className="db-input" style={{ marginBottom: 0 }} value={parentId} onChange={(e) => setParentId(e.target.value)}>
+            <option value="">— top level —</option>
+            {flat.map(({ node, depth }) => (
+              <option key={node.id} value={node.id}>{" ".repeat(depth * 2)}{node.name}</option>
+            ))}
+          </select>
+          <Button variant="primary" icon="plus" onClick={create}>New team</Button>
+        </div>
+      </div>
+
+      <div className="db-panel" style={{ padding: 0 }}>
+        {flat.length === 0 && (
+          <div className="db-mono db-muted" style={{ padding: 16 }}>No teams yet — create one above.</div>
+        )}
+        {flat.map(({ node, depth }) => (
+          <div
+            key={node.id}
+            style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "10px 14px", paddingLeft: 14 + depth * 22,
+              borderTop: "1px solid rgba(0,0,0,0.06)",
+            }}
+          >
+            <Icon name={node.children.length ? "folder" : "users"} size={15} />
+            <span className="db-cell-primary" style={{ minWidth: 130 }}>{node.name}</span>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, flex: 1 }}>
+              {node.members.map((mem) => (
+                <span key={mem.userId} className="db-member" style={{ gap: 5 }}>
+                  <span className="db-member-av" style={{ width: 20, height: 20, fontSize: 10 }}>{mem.init}</span>
+                  {mem.name}
+                  <button className="db-icon-mini" style={{ marginLeft: 2 }} title="Remove from team" onClick={() => removeMember(node.id, mem.userId)}>
+                    <Icon name="x" size={12} />
+                  </button>
+                </span>
+              ))}
+              {node.members.length === 0 && (
+                <span className="db-mono db-muted" style={{ fontSize: 12 }}>no members</span>
+              )}
+            </div>
+            <select
+              className="db-input"
+              style={{ marginBottom: 0, width: 150 }}
+              value=""
+              onChange={(e) => addMember(node.id, e.target.value)}
+            >
+              <option value="">+ add member…</option>
+              {assignable.map((m) => (
+                <option key={m.userId} value={m.userId}>{m.name}</option>
+              ))}
+            </select>
+            <button className="db-icon-mini danger" title="Delete team" onClick={() => del(node)}>
+              <Icon name="trash" size={15} />
+            </button>
+          </div>
+        ))}
       </div>
     </>
   );

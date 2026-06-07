@@ -208,3 +208,20 @@ insert into marketplace_listings (kind, name, description, ratings, version) val
  ('agent','PR reviewer','Reviews diffs against a ruleset, writes a report.','{"avg":4.8}'::jsonb,'1.2.0'),
  ('agent','Support triage','Triages tickets, drafts replies, escalates with HITL.','{"avg":4.6}'::jsonb,'1.1.0'),
  ('agent','Ticket builder','Implements scoped tickets and opens PRs.','{"avg":4.7}'::jsonb,'1.0.3');
+
+-- ── Team / business-unit hierarchy ───────────────────────────────────────────
+-- Engineering → (Platform, Support); Operations is a separate top-level unit.
+insert into teams (id, org_id, parent_team_id, name) values
+ ('77000000-0000-0000-0000-0000000000e1','11111111-1111-1111-1111-111111111111',null,'Engineering'),
+ ('77000000-0000-0000-0000-0000000000e2','11111111-1111-1111-1111-111111111111','77000000-0000-0000-0000-0000000000e1','Platform'),
+ ('77000000-0000-0000-0000-0000000000e3','11111111-1111-1111-1111-111111111111','77000000-0000-0000-0000-0000000000e1','Support'),
+ ('77000000-0000-0000-0000-0000000000e4','11111111-1111-1111-1111-111111111111',null,'Operations')
+ on conflict (id) do nothing;
+
+insert into team_memberships (org_id, team_id, user_id) values
+ ('11111111-1111-1111-1111-111111111111','77000000-0000-0000-0000-0000000000e1','22222222-2222-2222-2222-222222222222'),
+ ('11111111-1111-1111-1111-111111111111','77000000-0000-0000-0000-0000000000e2','33333333-3333-3333-3333-333333333333'),
+ ('11111111-1111-1111-1111-111111111111','77000000-0000-0000-0000-0000000000e2','44444444-4444-4444-4444-444444444444'),
+ ('11111111-1111-1111-1111-111111111111','77000000-0000-0000-0000-0000000000e3','55555555-5555-5555-5555-555555555555'),
+ ('11111111-1111-1111-1111-111111111111','77000000-0000-0000-0000-0000000000e4','44444444-4444-4444-4444-444444444444')
+ on conflict (team_id, user_id) do nothing;
