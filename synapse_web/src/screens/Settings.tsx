@@ -3,10 +3,10 @@
 // API tokens. Roles gate who can deploy, edit, approve HITL, and view secrets.
 // Ported from the design prototype's `Settings` (design-reference/app/Views.jsx)
 // and deepened with full Profile / Members / Billing / Tokens sub-tabs.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PageHead, Segmented, ConfirmDialog, MetricCard, SectionRow } from "../components/Common";
 import { Button, Icon } from "../components/Primitives";
-import { data } from "../api/queries";
+import { useOrg } from "../api/queries";
 import { useUI } from "../store/ui";
 
 type SubTab = "profile" | "members" | "billing" | "tokens";
@@ -34,7 +34,7 @@ const ROLE_ORDER: Role[] = ["owner", "admin", "operator", "viewer"];
 
 export default function Settings() {
   const showToast = useUI((s) => s.showToast);
-  const org = data.ORG;
+  const { data: org } = useOrg();
   const [sub, setSub] = useState<SubTab>("profile");
 
   return (
@@ -46,7 +46,7 @@ export default function Settings() {
         sub="Org profile, members and roles, billing, and API tokens. Roles gate who can deploy, edit, approve HITL, and view secrets-adjacent data."
         actions={
           <span className="db-mono db-muted" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-            <Icon name="shield-check" size={14} /> {org.name} · {org.plan}
+            <Icon name="shield-check" size={14} /> {org?.name} · {org?.plan}
           </span>
         }
       />
@@ -78,11 +78,16 @@ export default function Settings() {
 
 // ── Org profile ────────────────────────────────────────────────────────────
 function ProfileTab() {
-  const org = data.ORG;
-  const [name, setName] = useState(org.name);
+  const { data: org } = useOrg();
+  const [name, setName] = useState(org?.name ?? "");
   const [region, setRegion] = useState("us-east");
   const showToast = useUI((s) => s.showToast);
   const [saved, setSaved] = useState(true);
+
+  // Adopt the org name once it loads (the query resolves after first render).
+  useEffect(() => {
+    if (org?.name) setName(org.name);
+  }, [org?.name]);
 
   function save() {
     setSaved(true);
@@ -93,7 +98,7 @@ function ProfileTab() {
     <div className="db-panel" style={{ maxWidth: 560 }}>
       <div className="db-panel-head">
         <h3 className="db-panel-title">Organization</h3>
-        <span className="db-mono db-muted" style={{ fontSize: 11 }}>org · {org.name}</span>
+        <span className="db-mono db-muted" style={{ fontSize: 11 }}>org · {org?.name}</span>
       </div>
 
       <span className="db-sublabel">Display name</span>
@@ -113,11 +118,11 @@ function ProfileTab() {
       <div className="db-ov-facts" style={{ marginTop: 8 }}>
         <div className="db-ov-fact">
           <span className="db-ov-fact-l">Org owner</span>
-          <span className="db-mono">{org.operator}</span>
+          <span className="db-mono">{org?.operator}</span>
         </div>
         <div className="db-ov-fact">
           <span className="db-ov-fact-l">Plan</span>
-          <span className="db-mono">{org.plan}</span>
+          <span className="db-mono">{org?.plan}</span>
         </div>
         <div className="db-ov-fact">
           <span className="db-ov-fact-l">Created</span>

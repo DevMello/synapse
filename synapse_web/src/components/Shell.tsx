@@ -5,9 +5,7 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Icon, LogoMark } from "./Primitives";
 import { Toast } from "./Common";
 import { useUI } from "../store/ui";
-import { data } from "../api/queries";
-
-const ORG = data.ORG;
+import { useOrg, useAgents, useDaemons, useAlerts } from "../api/queries";
 
 interface NavItem { id: string; icon: string; name: string; path: string; badge?: "approvals" | "alerts" }
 interface NavSection { label: string; items: NavItem[] }
@@ -39,7 +37,8 @@ const VIEW_TITLES: Record<string, string> = {
 
 function useCounts() {
   const approvals = useUI((s) => s.approvals.length);
-  return { approvals, alerts: data.alerts.length };
+  const { data: alerts } = useAlerts();
+  return { approvals, alerts: alerts?.length ?? 0 };
 }
 
 function isActive(pathname: string, path: string): boolean {
@@ -51,6 +50,7 @@ function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const counts = useCounts();
+  const { data: org } = useOrg();
   return (
     <aside className="db-sidebar">
       <div className="db-brand">
@@ -92,8 +92,8 @@ function Sidebar() {
         <button className="db-ws-switch">
           <span className="db-ws-avatar">N</span>
           <span className="db-ws-meta">
-            <span className="db-ws-name">{ORG.name}</span>
-            <span className="db-ws-plan">{ORG.plan} workspace</span>
+            <span className="db-ws-name">{org?.name ?? ""}</span>
+            <span className="db-ws-plan">{org?.plan ?? ""} workspace</span>
           </span>
           <Icon name="chevrons-up-down" size={14} style={{ color: "var(--mute)", marginLeft: "auto" }} />
         </button>
@@ -105,11 +105,13 @@ function Sidebar() {
 interface Crumb { label: string; to?: string }
 function useCrumb(): Crumb[] {
   const { pathname } = useLocation();
+  const { data: org } = useOrg();
+  const { data: agents } = useAgents();
   const seg = pathname.split("/").filter(Boolean);
-  const home: Crumb = { label: ORG.name, to: "/" };
+  const home: Crumb = { label: org?.name ?? "", to: "/" };
   if (seg.length === 0) return [home, { label: "Dashboard" }];
   if (seg[0] === "agents" && seg[1]) {
-    const agent = data.agents.find((a) => a.id === seg[1]);
+    const agent = (agents ?? []).find((a) => a.id === seg[1]);
     return [home, { label: "Agents", to: "/agents" }, { label: agent ? agent.name : "Agent" }];
   }
   return [home, { label: VIEW_TITLES[seg[0]] || seg[0] }];
@@ -119,6 +121,7 @@ function HeaderBar() {
   const navigate = useNavigate();
   const crumb = useCrumb();
   const counts = useCounts();
+  const { data: org } = useOrg();
   const setPalette = useUI((s) => s.setPalette);
   const setTweaks = useUI((s) => s.setTweaks);
   return (
@@ -148,7 +151,7 @@ function HeaderBar() {
         <button className="db-icon-btn" onClick={() => navigate("/alerts")} title="Alerts">
           <Icon name="bell" size={17} />{counts.alerts > 0 && <span className="db-dot" />}
         </button>
-        <span className="db-avatar">{ORG.initials}</span>
+        <span className="db-avatar">{org?.initials ?? ""}</span>
       </div>
     </header>
   );
@@ -163,6 +166,8 @@ function CommandPalette() {
   const setWizard = useUI((s) => s.setWizard);
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
+  const { data: agents } = useAgents();
+  const { data: daemons } = useDaemons();
 
   const items = useMemo<PaletteItem[]>(() => {
     const base: PaletteItem[] = [
@@ -172,12 +177,12 @@ function CommandPalette() {
       { icon: "activity", label: "View all runs", hint: "runs", go: "/runs" },
       { icon: "cpu", label: "View agents", hint: "agents", go: "/agents" },
     ];
-    const agentItems: PaletteItem[] = data.agents.map((a) => ({ icon: "cpu", label: a.name, hint: a.engine, go: `/agents/${a.id}` }));
-    const daemonItems: PaletteItem[] = data.daemons.map((d) => ({ icon: "server", label: d.name, hint: d.os, go: "/daemons" }));
+    const agentItems: PaletteItem[] = (agents ?? []).map((a) => ({ icon: "cpu", label: a.name, hint: a.engine, go: `/agents/${a.id}` }));
+    const daemonItems: PaletteItem[] = (daemons ?? []).map((d) => ({ icon: "server", label: d.name, hint: d.os, go: "/daemons" }));
     const all = [...base, ...agentItems, ...daemonItems];
     if (!q.trim()) return all.slice(0, 8);
     return all.filter((i) => i.label.toLowerCase().includes(q.toLowerCase())).slice(0, 8);
-  }, [q]);
+  }, [q, agents, daemons]);
 
   function run(it: PaletteItem) {
     setPalette(false);

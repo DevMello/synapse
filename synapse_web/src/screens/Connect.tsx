@@ -7,7 +7,7 @@ import { useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react
 import { useNavigate } from "react-router-dom";
 import { Icon, HatchCorners } from "../components/Primitives";
 import { useUI } from "../store/ui";
-import { data } from "../api/queries";
+import { useOrg } from "../api/queries";
 
 type Step = "enter" | "verify" | "approved";
 
@@ -33,7 +33,7 @@ export default function Connect() {
   const [digits, setDigits] = useState<string[]>(EMPTY);
   const refs = useRef<Array<HTMLInputElement | null>>([]);
 
-  const orgName = data.ORG.name;
+  const orgName = useOrg().data?.name ?? "";
   const code = digits.join("");
   const full = code.length === 8;
 

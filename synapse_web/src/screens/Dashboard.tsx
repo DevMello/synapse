@@ -2,18 +2,25 @@
 // Dashboard.jsx: fleet metrics, live active-runs table, top agents by spend,
 // daemon heartbeats, and the alerts feed. Data comes through the TanStack hooks;
 // the live approvals count comes from the UI store.
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button, Chip, Icon } from "../components/Primitives";
 import {
   AgentAvatar, HeartStrip, Link, MetricCard, PageHead, SectionRow, Sparkline, daemonName,
 } from "../components/Common";
 import { useAgents, useAlerts, useDaemons, useRuns } from "../api/queries";
+import { subscribeFleet } from "../api/realtime";
 import { useUI } from "../store/ui";
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const setWizard = useUI((s) => s.setWizard);
   const approvals = useUI((s) => s.approvals);
+  const queryClient = useQueryClient();
+
+  // Live fleet updates: patch the query cache on runs/approvals/alerts/daemon events.
+  useEffect(() => subscribeFleet(queryClient), [queryClient]);
 
   const { data: daemons = [] } = useDaemons();
   const { data: agents = [] } = useAgents();

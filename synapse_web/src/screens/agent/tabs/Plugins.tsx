@@ -2,12 +2,12 @@
 // model: a pack is provisioned once on the host daemon (§4.2), then attached to an
 // agent here — instant, reusing the provisioned sandbox. Built on-system from
 // docs/web-ui.md §4.7, composed from the existing .db-* design language.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon, Button, Chip } from "../../../components/Primitives";
 import { Toggle } from "../../../components/Common";
 import { useCurrentAgent } from "../context";
-import { data } from "../../../api/queries";
+import { useDaemon } from "../../../api/queries";
 import { useUI } from "../../../store/ui";
 import type { Capability } from "../../../types";
 
@@ -46,19 +46,24 @@ export default function PluginsTab() {
   const navigate = useNavigate();
   const showToast = useUI((s) => s.showToast);
 
-  const daemon = data.daemons.find((d) => d.id === agent.daemonId);
+  const { data: daemon } = useDaemon(agent.daemonId);
   const packs = useMemo(
     () => (daemon?.capabilities ?? []).filter((c) => c.kind === "plugin" || c.kind === "MCP server"),
     [daemon],
   );
 
   // Agent-tier attach state. Built-in default packs start auto-attached; everything
-  // else starts detached. Pin selections track which packs are pinned to a version.
-  const [attached, setAttached] = useState<Record<string, boolean>>(() => {
+  // else starts detached. Seeded once the host daemon's capabilities resolve (they
+  // arrive after first render). Pin selections track packs pinned to a version.
+  const [attached, setAttached] = useState<Record<string, boolean>>({});
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (seeded.current || packs.length === 0) return;
     const m: Record<string, boolean> = {};
     packs.forEach((p) => { m[p.id] = p.builtin; });
-    return m;
-  });
+    setAttached(m);
+    seeded.current = true;
+  }, [packs]);
   const [pinned, setPinned] = useState<Record<string, boolean>>({});
 
   function toggleAttach(p: Capability, next: boolean) {
