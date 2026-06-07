@@ -1456,6 +1456,57 @@ export type Database = {
           },
         ]
       }
+      org_invitations: {
+        Row: {
+          accepted_at: string | null
+          created_at: string
+          email: string
+          id: string
+          invited_by: string | null
+          org_id: string
+          role: Database["public"]["Enums"]["membership_role"]
+          status: Database["public"]["Enums"]["invitation_status"]
+          token: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          created_at?: string
+          email: string
+          id?: string
+          invited_by?: string | null
+          org_id: string
+          role?: Database["public"]["Enums"]["membership_role"]
+          status?: Database["public"]["Enums"]["invitation_status"]
+          token?: string
+        }
+        Update: {
+          accepted_at?: string | null
+          created_at?: string
+          email?: string
+          id?: string
+          invited_by?: string | null
+          org_id?: string
+          role?: Database["public"]["Enums"]["membership_role"]
+          status?: Database["public"]["Enums"]["invitation_status"]
+          token?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "org_invitations_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_invitations_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organizations: {
         Row: {
           created_at: string
@@ -2040,6 +2091,7 @@ export type Database = {
       env_var_scope: "agent" | "shared"
       hitl_severity: "block" | "require-approval"
       hitl_status: "pending" | "approved" | "denied" | "expired"
+      invitation_status: "pending" | "accepted" | "revoked"
       listing_kind: "agent" | "skill" | "plugin"
       membership_role: "owner" | "admin" | "operator" | "viewer"
       notification_channel_kind: "slack" | "discord" | "email" | "in_app"
@@ -2192,6 +2244,7 @@ export const Constants = {
       env_var_scope: ["agent", "shared"],
       hitl_severity: ["block", "require-approval"],
       hitl_status: ["pending", "approved", "denied", "expired"],
+      invitation_status: ["pending", "accepted", "revoked"],
       listing_kind: ["agent", "skill", "plugin"],
       membership_role: ["owner", "admin", "operator", "viewer"],
       notification_channel_kind: ["slack", "discord", "email", "in_app"],

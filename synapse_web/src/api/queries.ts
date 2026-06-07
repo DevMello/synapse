@@ -18,6 +18,9 @@ export { useVersions, usePrompt } from "./queries/versions";
 export { useTemplates } from "./queries/templates";
 export { useSkills } from "./queries/skills";
 export { useCapabilityDefs } from "./queries/capabilities";
+export {
+  useMembers, useInvitations, useInviteMember, useUpdateMemberRole, useRemoveMember, useRevokeInvitation,
+} from "./queries/members";
 
 // Synchronous accessor for components that need the busy-fleet snapshot (e.g.
 // cross-referencing an agent's host daemon) without a hook subscription. Screen-
