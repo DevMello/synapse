@@ -4,7 +4,7 @@
 > **off by default**, gated behind an org-level feature flag and an explicit consent
 > screen, **excluded from `production`-tagged agents**, and enabled only by an org owner.
 > These features deliberately bend assumptions the rest of the platform relies on, so each
-> ships with its blast-radius controls *first*. Last updated 2026-05-31.
+> ships with its blast-radius controls *first*. Last updated 2026-06-07.
 
 This file collects high-risk, exploratory features that are not yet promoted into the four
 core specs ([tui-daemon](tui-daemon.md), [cloud-backend](cloud-backend.md),
@@ -1054,3 +1054,229 @@ No new transport primitive: findings stream up over the existing **telemetry cha
 - **`.claude/memory/project_overview.md`** — the intent-monitoring model + decisions G1–G6
   (AI detects/daemon enforces, friction-only, on-device + cloud baseline, action-scoped
   just-in-time authorization for destructive tools, operator-set envelope, fail-safe).
+
+---
+
+## 13. Feature 6 — Enterprise SSO sign-in (SAML / OIDC + SCIM)
+
+> **ENTERPRISE — security-sensitive, not high-risk-experimental.** Unlike §§1–4 (which add a
+> new principal) or §10 (which spends N×), this does **not** bend a platform invariant — it
+> changes **how a human session is authenticated**, and leaves **authorization untouched**
+> (the org/membership/role model from Members & RBAC stays the floor). It is **off by default**,
+> **owner-only** to configure, and scoped per org. The whole design rests on one rule:
+>
+> > **SSO authenticates; it never authorizes.** The identity provider proves *who the human is*;
+> > Synapse alone decides *what they may do* via `memberships.role` and RLS. An IdP claim can
+> > never directly mint an `admin`/`owner` — role grants stay a human-confirmed action.
+
+### 13.1 Why this exists & what it builds on
+
+Today a human signs in with **Supabase Auth email/password**, gated by the Web UI's
+**`AuthGate`** (`RequireSession` in [web-ui.md](web-ui.md)); the session's JWT identifies the
+user and authorization is resolved from **`memberships`** via `user_org_ids()` / RLS
+([cloud-backend §4](cloud-backend.md)). Enterprises require their workforce identity provider
+(Okta, Entra ID/Azure AD, Google Workspace, Ping, JumpCloud…) to be the single source of
+truth: one place to grant/revoke access, MFA enforced centrally, no per-tool passwords. This
+feature adds **SAML 2.0 / OIDC SSO** and **SCIM 2.0** lifecycle on top of the existing auth,
+reusing Supabase Auth's enterprise SSO rather than building a bespoke auth server.
+
+It is the natural successor to the just-shipped **Members & RBAC + `org_invitations`** work:
+manual email invites become **automatic, IdP-governed provisioning**, while the role model
+and RLS they introduced stay exactly as-is.
+
+### 13.2 Locked design decisions
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| S1 | **Delegate authentication to the org's IdP via Supabase Auth SSO** (SAML 2.0) **/ OIDC**; never build a bespoke auth server, never see the user's IdP password. | Reuses the platform's existing auth substrate; inherits MFA/conditional-access from the IdP; smallest new attack surface. |
+| S2 | **Authn only — authorization is unchanged.** SSO mints the session; the JWT still identifies the user and RLS still derives org/role from `memberships`. SSO config never touches a policy. | Keeps the one trust boundary intact: a misconfigured/compromised IdP mapping can grant *login*, never *elevated authority*. Mirrors the §3 "deterministic floor" property for auth. |
+| S3 | **JIT provisioning is bounded to the lowest role.** First SSO login auto-creates the `users` row + a `memberships` row at a **default role (viewer)** only; elevation stays an admin action (or an explicit, admin-confirmed group→role map, S6). | An IdP claim must never self-elevate. Closes the "attacker who controls a group claim becomes admin" hole. |
+| S4 | **Domain-verified org routing.** An org claims one or more **verified email domains**; a sign-in email matching a claimed domain is routed to that org's SSO connection. Domain ownership must be **DNS-verified** before it routes. | Prevents org-hijack by email-domain spoofing; deterministic which IdP handles a given user. |
+| S5 | **"Require SSO" is enforceable per domain, with break-glass.** Once an org enables enforcement, password sign-in for users on its claimed domains is **disabled** (no backdoor) — except a small, audited set of **break-glass owner accounts** exempt by design. | Enterprises need "everyone goes through the IdP" to be real, but a fully-locked org that loses its IdP must not be permanently bricked. |
+| S6 | **Group→role mapping is explicit and admin-confirmed; SCIM deprovision is immediate.** IdP groups map to Synapse roles only through a mapping an **admin sets** (never raw claim trust); SCIM (or IdP removal) **revokes the membership immediately** and ends daemon-relayed sessions on next reconnect. | Joiner/mover/leaver lifecycle lives in the IdP (the enterprise requirement), but the *meaning* of a group is owner-defined, and offboarding is prompt and auditable. |
+
+### 13.3 Sign-in flow
+
+```
+Human opens Synapse Web UI → AuthGate (no session)
+  │  enters work email  ──►  domain lookup against verified org_domains
+  │     no match  → normal Supabase email/password (unchanged)
+  │     match     → org has an SSO connection → "Sign in with <Org IdP>"
+  ▼
+Supabase Auth SSO: redirect to the org's IdP (SAML 2.0 AuthnRequest / OIDC authorize)
+  │     IdP authenticates (password + MFA + conditional access — all the enterprise's own)
+  ▼
+IdP POSTs SAML assertion / OIDC code back → Supabase Auth verifies signature, mints a session
+  ▼
+Cloud post-sign-in hook (JIT, S3):
+  │  users row upsert (id = auth uid, email, display_name from assertion)
+  │  membership exists for the routed org?
+  │     YES → leave role as-is (SSO never changes an existing role)
+  │     NO  → create membership at DEFAULT role = viewer   (+ apply admin-confirmed
+  │           group→role map if configured, S6; never above the map's ceiling)
+  ▼
+AuthGate sees a session → app loads; RLS resolves org/role from memberships exactly as today
+```
+
+A returning user with a live membership simply lands in the app; the JIT step is a no-op
+except refreshing `display_name`. **An expired/revoked IdP account cannot mint a session at
+all** (the IdP refuses) — and SCIM/deprovision (S6) removes the membership so even a cached
+token resolves to zero rows under RLS.
+
+### 13.4 JIT provisioning & the invitation path (how they coexist)
+
+- **SSO JIT replaces manual invites for governed domains.** Where `org_invitations`
+  (the shipped invite-by-email) is a human pulling someone in one at a time, SSO JIT is the
+  IdP pushing the whole eligible workforce — anyone who can authenticate against the org's IdP
+  and matches a claimed domain is provisioned on first login.
+- **Invitations still work for non-SSO / cross-domain guests** (e.g. an external contractor on
+  a different email domain): an explicit `org_invitations` row, unchanged.
+- **No double-provisioning:** JIT upserts on `(org_id, user_id)`; a pre-existing invite for the
+  same email is marked `accepted` when the SSO user lands.
+
+### 13.5 Group → role mapping (bounded, S6)
+
+```jsonc
+// org_sso_connections.role_mapping  (admin-confirmed; absent ⇒ everyone lands at viewer)
+{
+  "default_role": "viewer",                 // S3 floor for anyone not matched below
+  "claim": "groups",                         // the IdP claim/attribute to read
+  "rules": [
+    { "group": "synapse-admins",    "role": "admin"    },
+    { "group": "synapse-operators", "role": "operator" }
+  ],
+  "ceiling": "admin"                         // SSO can never auto-grant 'owner' (S3)
+}
+```
+
+- The mapping is **edited and confirmed by an org admin** — raw IdP claims are never trusted to
+  assign a role on their own (S6).
+- **`owner` is never SSO-assignable** — ownership transfer stays a deliberate in-app action.
+- On each login the role is **re-evaluated only upward to the mapped value if the org opts into
+  "sync role from IdP"**; by default SSO **never downgrades or changes an existing role** (S2) —
+  role changes flow through Members & RBAC, keeping one audit story for elevation.
+
+### 13.6 SCIM 2.0 lifecycle (opt-in, S6)
+
+SCIM is **not** native to Supabase Auth, so it is a **Synapse Cloud Backend endpoint**
+(`/scim/v2/Users`, `/scim/v2/Groups`) authenticated by a **per-org SCIM bearer token**:
+
+- **Provision/Update** → upsert `users` + `memberships` (role via the §13.5 map).
+- **Deprovision** (IdP disables/removes a user) → **immediately revoke** the membership and
+  flag any daemon-relayed sessions for that user to end on next reconnect (reuses the existing
+  daemon revoke path, [cloud-backend §…](cloud-backend.md)).
+- **Group sync** → keeps `synapse-admins`/`synapse-operators` membership in step with the IdP,
+  still through the admin-confirmed map (never raw).
+
+SCIM is **off by default** and independent of interactive SSO — an org can run SSO-only (JIT on
+login) without SCIM, or add SCIM for full joiner/mover/leaver automation.
+
+### 13.7 "Require SSO" enforcement & break-glass (S5)
+
+- When enabled, **password sign-in is rejected for any email on the org's verified domains** —
+  the AuthGate offers only "Sign in with <IdP>". This is the enterprise "no local passwords"
+  requirement made real.
+- **Break-glass:** a small, explicitly-flagged set of **owner** accounts (`break_glass = true`)
+  remain password-capable (ideally with their own MFA), so an org whose IdP outage or
+  misconfiguration would otherwise lock everyone out can still recover. Every break-glass login
+  is **audited and alertable**.
+- Enforcement is an **org setting**, owner-only, with a confirmation screen spelling out the
+  lockout/break-glass implications.
+
+### 13.8 Trust model & layering (how it sits with the existing auth)
+
+| Layer | Question it answers | Changes here? |
+|-------|--------------------|---------------|
+| **AuthGate / Supabase Auth** | Is there a valid session, and who is the user? | **extended** — session can now be minted via SAML/OIDC, not just password |
+| **JIT / SCIM provisioning** | Should this authenticated human have a membership, and at what *floor* role? | **new** — bounded to viewer + admin-confirmed map (S3/S6) |
+| **`memberships` + RLS** (Members & RBAC) | What may this user do in this org? | **unchanged** — still the sole authorization source |
+
+SSO/SCIM only ever **create or remove a membership and set its floor role**; they never write a
+policy, never touch RLS, and never grant `owner`. Authorization remains exactly the model the
+Members & RBAC work established.
+
+### 13.9 Data model (cloud)
+
+| Table | Change |
+|-------|--------|
+| **`org_sso_connections`** | **new** — per-org IdP config: `protocol` (`saml`/`oidc`), Supabase SSO provider id, metadata/issuer/ACS, `role_mapping` (§13.5), `enforce_sso` (bool), `created_by`, timestamps. **No IdP secrets in plaintext** — signing certs/metadata only; client secrets live in the secret store. |
+| **`org_domains`** | **new** — `org_id`, `domain`, `verified_at`, DNS `verification_token`; routes a sign-in email to an org's SSO connection (S4). Unique on `domain`. |
+| **`scim_tokens`** | **new** — per-org SCIM bearer token (**hashed**), `scopes`, `last_used_at`, `revoked_at` (S6). |
+| `users` | += `auth_source` (`password`/`saml`/`oidc`/`scim`) for provenance/audit. |
+| `memberships` | += `provisioned_via` (`manual`/`invitation`/`sso_jit`/`scim`), `idp_external_id`, `break_glass` (bool, S5). |
+| `audit_events` | new kinds: `sso_login`, `sso_jit_provision`, `scim_provision`, `scim_deprovision`, `break_glass_login`, `sso_enforcement_changed`. |
+
+All org-scoped tables are **RLS-scoped by `org_id`** like the rest of the schema; `scim_tokens`
+and IdP secrets are **service-role-only** (never readable by `authenticated`).
+
+### 13.10 New surface / endpoints
+
+| Surface | Purpose |
+|---------|---------|
+| Supabase Auth SSO (SAML/OIDC) | the IdP redirect + assertion verification + session mint (reused, not built) |
+| Cloud post-sign-in hook | JIT upsert of `users` + `memberships` at the floor role (§13.3) |
+| `POST /scim/v2/Users`, `/scim/v2/Groups` (+ PATCH/DELETE) | SCIM lifecycle, per-org bearer token (§13.6) |
+| `GET /sso/route?email=` | domain→connection lookup the AuthGate calls to decide password vs SSO (S4) |
+| `org_domains` DNS verification | TXT-record challenge to prove domain ownership before routing |
+| Daemon revoke (reused) | SCIM deprovision ends a user's daemon-relayed sessions on reconnect |
+
+### 13.11 Web UI
+
+- **AuthGate** gains an email-first step: enter work email → if the domain is SSO-governed,
+  show **"Sign in with <Org IdP>"** (and, when `enforce_sso`, *hide* the password field);
+  otherwise the existing password form. (`synapse_web/src/lib/auth.tsx`.)
+- **Settings → Authentication** (new sub-tab, owner-only, next to **Members & RBAC** / **Teams**):
+  - **SSO connection** — pick SAML or OIDC, paste IdP metadata / configure OIDC, test the
+    connection, see the ACS/entity-id to hand back to the IdP admin.
+  - **Domains** — add a domain, show the DNS TXT challenge, verify, list verified domains.
+  - **Role mapping** — the admin-confirmed group→role table (§13.5), with the `owner` ceiling
+    enforced in the UI.
+  - **Require SSO** toggle with the break-glass explainer (S5).
+  - **SCIM** — generate/rotate/revoke the SCIM bearer token; show the SCIM base URL.
+- **Members & RBAC** rows gain a provenance chip (`SSO` / `SCIM` / `invited` / `manual`) and a
+  **break-glass** badge, so an admin can see *how* each member got in.
+
+### 13.12 Risk notes
+
+| Concern | Mitigation |
+|---------|------------|
+| IdP/claim compromise grants elevated access | **S2/S3** — SSO authenticates only; JIT floor is `viewer`, `owner` never SSO-assignable, group→role is admin-confirmed (S6), not raw-claim-trusted |
+| Email-domain spoofing hijacks an org | **S4** — domains must be **DNS-verified** before routing; `org_domains.domain` is globally unique |
+| IdP outage / misconfig locks everyone out | **S5** break-glass owner accounts (audited) + an owner-only enforcement toggle with a clear warning |
+| Offboarded user retains access | **S6** — SCIM/IdP removal revokes the membership immediately; even a cached JWT resolves to zero rows (RLS) and daemon sessions end on reconnect |
+| SCIM token leakage | token **hashed at rest**, scoped, rotatable/revocable, service-role-only; all SCIM ops audited |
+| SSO silently changes a role unexpectedly | default is **never change an existing role** (S2); "sync role from IdP" is explicit opt-in and capped by the mapping ceiling |
+| SAML assertion replay / signature bypass | handled by **Supabase Auth's** SSO verification (reused, not hand-rolled); we never parse raw assertions ourselves |
+
+### 13.13 Open questions / future
+
+- **Multiple IdPs per org** (e.g. post-merger two directories) — connection precedence + domain
+  partitioning.
+- **SCIM-driven team membership** — map IdP groups straight onto the §-team hierarchy
+  (Teams), not just roles, so org structure mirrors the directory.
+- **Per-daemon / device-bound SSO step-up** — require a fresh IdP assertion before a
+  high-blast-radius action (ties to §12's destructive gate).
+- **Just-in-time *de*-provisioning latency** — webhook-based instant revoke vs SCIM polling.
+- **SSO for the TUI device-login flow** — today device-code auth ([integration.md](integration.md))
+  assumes an interactive browser session; routing it through the org IdP.
+
+### 13.14 Promotion checklist — where this lands when graduated
+
+- **[cloud-backend.md](cloud-backend.md)** — `org_sso_connections` / `org_domains` /
+  `scim_tokens` + the `users`/`memberships`/`audit_events` deltas (§13.9); the post-sign-in JIT
+  hook; the SCIM 2.0 endpoints + per-org token auth; domain DNS verification; `enforce_sso`
+  gating + break-glass; service-role-only handling of IdP/SCIM secrets.
+- **[web-ui.md](web-ui.md)** — the email-first **AuthGate** (password vs "Sign in with IdP",
+  hidden password under enforcement); the owner-only **Settings → Authentication** sub-tab
+  (connection + domains + role map + require-SSO + SCIM token); member provenance/break-glass
+  chips in Members & RBAC.
+- **[integration.md](integration.md)** — a walkthrough (admin configures SAML → verifies domain →
+  user signs in via IdP → JIT membership at viewer → SCIM deprovision revokes); a
+  responsibility-matrix row (IdP authenticates / Synapse authorizes); the `/scim/v2/*` +
+  `/sso/route` surface and reuse of the daemon revoke path.
+- **[tui-daemon.md](tui-daemon.md)** — only if SSO step-up or SSO device-login is adopted
+  (§13.13); otherwise the daemon is unaffected (SSO changes session minting, not execution).
+- **`.claude/memory/project_overview.md`** — the SSO model + decisions S1–S6 (delegate authn to
+  the IdP via Supabase Auth, authn-only/authorization-unchanged, viewer-floor JIT,
+  DNS-verified domain routing, require-SSO + break-glass, admin-confirmed group→role + immediate
+  SCIM deprovision).
