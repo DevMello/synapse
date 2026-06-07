@@ -175,3 +175,31 @@ export interface TraceLine {
   text: string;
   comment?: string;
 }
+
+// Org membership — mirrors the `memberships` row joined to the member's user.
+export type Role = "owner" | "admin" | "operator" | "viewer";
+
+export interface Member {
+  userId: string; // user id for real members; the invitation id for pending invites
+  name: string;
+  email: string;
+  role: Role;
+  init: string;
+  active: string; // relative "joined" time, or "invited" for a pending invitation
+  pending?: boolean; // true = an unaccepted org_invitations row, not yet a member
+}
+
+// Team / business-unit hierarchy within an org (teams self-nest via parentId).
+export interface TeamMemberLite {
+  userId: string;
+  name: string;
+  init: string;
+}
+
+export interface TeamNode {
+  id: string;
+  name: string;
+  parentId: string | null;
+  members: TeamMemberLite[];
+  children: TeamNode[];
+}

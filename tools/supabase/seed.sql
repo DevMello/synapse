@@ -43,6 +43,49 @@ insert into memberships (org_id, user_id, role) values
   ('11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222','owner')
   on conflict (org_id, user_id) do update set role = excluded.role;
 
+-- ── Additional demo accounts for Members & RBAC ──────────────────────────────
+-- jin/mara/theo become members; priya is an account with NO membership (an invite
+-- target). All share the password synapse123.
+do $$
+declare
+  ids uuid[] := array[
+    '33333333-3333-3333-3333-333333333333','44444444-4444-4444-4444-444444444444',
+    '55555555-5555-5555-5555-555555555555','66666666-6666-6666-6666-666666666666'
+  ];
+  emails text[] := array['jin@northwind.test','mara@northwind.test','theo@northwind.test','priya@northwind.test'];
+  i int;
+begin
+  for i in 1..4 loop
+    insert into auth.users (
+      instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at,
+      raw_app_meta_data, raw_user_meta_data,
+      confirmation_token, recovery_token, email_change, email_change_token_new,
+      email_change_token_current, phone_change, phone_change_token, reauthentication_token
+    ) values (
+      '00000000-0000-0000-0000-000000000000', ids[i], 'authenticated','authenticated', emails[i],
+      crypt('synapse123', gen_salt('bf')), now(), now(), now(),
+      '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb, '', '', '', '', '', '', '', ''
+    ) on conflict (id) do nothing;
+    insert into auth.identities (id, user_id, provider_id, identity_data, provider, last_sign_in_at, created_at, updated_at)
+    values (gen_random_uuid(), ids[i], ids[i],
+      jsonb_build_object('sub', ids[i]::text, 'email', emails[i]), 'email', now(), now(), now())
+    on conflict (provider_id, provider) do nothing;
+  end loop;
+end $$;
+
+insert into users (id, email, display_name) values
+ ('33333333-3333-3333-3333-333333333333','jin@northwind.test','Jin Park'),
+ ('44444444-4444-4444-4444-444444444444','mara@northwind.test','Mara Vance'),
+ ('55555555-5555-5555-5555-555555555555','theo@northwind.test','Theo Lund'),
+ ('66666666-6666-6666-6666-666666666666','priya@northwind.test','Priya Nair')
+ on conflict (id) do update set display_name = excluded.display_name;
+
+insert into memberships (org_id, user_id, role, created_at) values
+ ('11111111-1111-1111-1111-111111111111','33333333-3333-3333-3333-333333333333','admin', now()-interval '40 day'),
+ ('11111111-1111-1111-1111-111111111111','44444444-4444-4444-4444-444444444444','operator', now()-interval '20 day'),
+ ('11111111-1111-1111-1111-111111111111','55555555-5555-5555-5555-555555555555','viewer', now()-interval '8 day')
+ on conflict (org_id, user_id) do update set role = excluded.role;
+
 -- ── Daemons + presence + latest cpu/mem metrics ──────────────────────────────
 insert into daemons (id, org_id, name, tags, platform, version, status, hostname, os_version, last_ip, last_seen) values
  ('aa000000-0000-0000-0000-0000000000d1','11111111-1111-1111-1111-111111111111','my-macbook-pro','{laptop,apple-silicon}','darwin/arm64','synapsed 1.4.2','online','my-macbook-pro.local','macOS 15.3','192.168.1.24', now() - interval '2 min'),
@@ -165,3 +208,20 @@ insert into marketplace_listings (kind, name, description, ratings, version) val
  ('agent','PR reviewer','Reviews diffs against a ruleset, writes a report.','{"avg":4.8}'::jsonb,'1.2.0'),
  ('agent','Support triage','Triages tickets, drafts replies, escalates with HITL.','{"avg":4.6}'::jsonb,'1.1.0'),
  ('agent','Ticket builder','Implements scoped tickets and opens PRs.','{"avg":4.7}'::jsonb,'1.0.3');
+
+-- ── Team / business-unit hierarchy ───────────────────────────────────────────
+-- Engineering → (Platform, Support); Operations is a separate top-level unit.
+insert into teams (id, org_id, parent_team_id, name) values
+ ('77000000-0000-0000-0000-0000000000e1','11111111-1111-1111-1111-111111111111',null,'Engineering'),
+ ('77000000-0000-0000-0000-0000000000e2','11111111-1111-1111-1111-111111111111','77000000-0000-0000-0000-0000000000e1','Platform'),
+ ('77000000-0000-0000-0000-0000000000e3','11111111-1111-1111-1111-111111111111','77000000-0000-0000-0000-0000000000e1','Support'),
+ ('77000000-0000-0000-0000-0000000000e4','11111111-1111-1111-1111-111111111111',null,'Operations')
+ on conflict (id) do nothing;
+
+insert into team_memberships (org_id, team_id, user_id) values
+ ('11111111-1111-1111-1111-111111111111','77000000-0000-0000-0000-0000000000e1','22222222-2222-2222-2222-222222222222'),
+ ('11111111-1111-1111-1111-111111111111','77000000-0000-0000-0000-0000000000e2','33333333-3333-3333-3333-333333333333'),
+ ('11111111-1111-1111-1111-111111111111','77000000-0000-0000-0000-0000000000e2','44444444-4444-4444-4444-444444444444'),
+ ('11111111-1111-1111-1111-111111111111','77000000-0000-0000-0000-0000000000e3','55555555-5555-5555-5555-555555555555'),
+ ('11111111-1111-1111-1111-111111111111','77000000-0000-0000-0000-0000000000e4','44444444-4444-4444-4444-444444444444')
+ on conflict (team_id, user_id) do nothing;

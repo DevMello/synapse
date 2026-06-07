@@ -6,20 +6,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { PageHead, Segmented, ConfirmDialog, MetricCard, SectionRow } from "../components/Common";
 import { Button, Icon } from "../components/Primitives";
-import { useOrg } from "../api/queries";
+import {
+  useOrg, useMembers, useInvitations, useInviteMember, useUpdateMemberRole, useRemoveMember, useRevokeInvitation,
+  useTeams, useCreateTeam, useDeleteTeam, useAddTeamMember, useRemoveTeamMember,
+} from "../api/queries";
 import { useUI } from "../store/ui";
+import type { Member, Role, TeamNode } from "../types";
 
-type SubTab = "profile" | "members" | "billing" | "tokens";
-
-type Role = "owner" | "admin" | "operator" | "viewer";
-
-interface Member {
-  name: string;
-  email: string;
-  role: Role;
-  init: string;
-  active: string;
-}
+type SubTab = "profile" | "members" | "teams" | "billing" | "tokens";
 
 // What each role is permitted to do — surfaced as RBAC copy so operators
 // understand exactly what an invite grants.
@@ -55,6 +49,7 @@ export default function Settings() {
         {([
           ["profile", "Org profile"],
           ["members", "Members & RBAC"],
+          ["teams", "Teams"],
           ["billing", "Billing & usage"],
           ["tokens", "API tokens"],
         ] as [SubTab, string][]).map(([id, label]) => (
@@ -70,6 +65,7 @@ export default function Settings() {
 
       {sub === "profile" && <ProfileTab />}
       {sub === "members" && <MembersTab showToast={showToast} />}
+      {sub === "teams" && <TeamsTab showToast={showToast} />}
       {sub === "billing" && <BillingTab />}
       {sub === "tokens" && <TokensTab showToast={showToast} />}
     </>
@@ -144,25 +140,21 @@ function ProfileTab() {
 }
 
 // ── Members & RBAC ───────────────────────────────────────────────────────────
-const SEED_MEMBERS: Member[] = [
-  { name: "Avery Koss", email: "avery@northwind.io", role: "owner", init: "AK", active: "now" },
-  { name: "Jin Park", email: "jin@northwind.io", role: "admin", init: "JP", active: "4 min ago" },
-  { name: "Mara Vance", email: "mara@northwind.io", role: "operator", init: "MV", active: "1 h ago" },
-  { name: "Theo Lund", email: "theo@northwind.io", role: "viewer", init: "TL", active: "yesterday" },
-  { name: "Priya Nair", email: "priya@northwind.io", role: "operator", init: "PN", active: "2 days ago" },
-];
-
-function initialsFor(email: string): string {
-  const local = email.split("@")[0];
-  const parts = local.split(/[.\-_]/).filter(Boolean);
-  const letters = (parts.length >= 2 ? parts[0][0] + parts[1][0] : local.slice(0, 2));
-  return letters.toUpperCase();
-}
-
 function MembersTab({ showToast }: { showToast: (m: { text: string; variant?: "ok" | "warn" }) => void }) {
-  const [members, setMembers] = useState<Member[]>(SEED_MEMBERS);
+  // The list is derived directly from the queries (no mirrored local state) — the
+  // mutations reconcile via onSettled invalidation. Defaulting to [] here is safe
+  // because it's only read during render, never as an effect dependency.
+  const { data: members = [] } = useMembers();
+  const { data: invites = [] } = useInvitations();
+  const inviteMut = useInviteMember();
+  const roleMut = useUpdateMemberRole();
+  const removeMut = useRemoveMember();
+  const revokeMut = useRevokeInvitation();
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<Role>("operator");
+
+  // Real members first, then pending invitations (shown as "invited" rows).
+  const rows: Member[] = [...members, ...invites];
 
   function invite() {
     const email = inviteEmail.trim().toLowerCase();
@@ -170,41 +162,59 @@ function MembersTab({ showToast }: { showToast: (m: { text: string; variant?: "o
       showToast({ text: "Enter a valid email to invite", variant: "warn" });
       return;
     }
-    if (members.some((m) => m.email === email)) {
-      showToast({ text: "That person is already a member", variant: "warn" });
+    if (rows.some((m) => m.email === email)) {
+      showToast({ text: "That person is already a member or invited", variant: "warn" });
       return;
     }
-    const name = email.split("@")[0].replace(/[.\-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-    setMembers((ms) => [
-      ...ms,
-      { name, email, role: inviteRole, init: initialsFor(email), active: "invited" },
-    ]);
     setInviteEmail("");
-    showToast({ text: `Invite sent to ${email} as ${inviteRole}` });
-  }
-
-  function cycleRole(email: string) {
-    // Owner is fixed; cycle the rest: admin → operator → viewer → admin.
-    const cyclable: Role[] = ["admin", "operator", "viewer"];
-    setMembers((ms) =>
-      ms.map((m) => {
-        if (m.email !== email || m.role === "owner") return m;
-        const next = cyclable[(cyclable.indexOf(m.role) + 1) % cyclable.length];
-        showToast({ text: `${m.name} is now ${next}` });
-        return { ...m, role: next };
-      }),
+    inviteMut.mutate(
+      { email, role: inviteRole },
+      {
+        onSuccess: () => showToast({ text: `Invited ${email} as ${inviteRole}` }),
+        onError: (e) => showToast({ text: (e as Error).message, variant: "warn" }),
+      },
     );
   }
 
-  function remove(email: string) {
-    setMembers((ms) => ms.filter((m) => m.email !== email));
-    showToast({ text: "Member removed from workspace", variant: "warn" });
+  function cycleRole(m: Member) {
+    if (m.role === "owner" || m.pending) return; // owner fixed; pending invites not editable here
+    const cyclable: Role[] = ["admin", "operator", "viewer"];
+    const next = cyclable[(cyclable.indexOf(m.role) + 1) % cyclable.length];
+    roleMut.mutate(
+      { userId: m.userId, role: next },
+      {
+        onSuccess: () => showToast({ text: `${m.name} is now ${next}` }),
+        onError: (e) => showToast({ text: (e as Error).message, variant: "warn" }),
+      },
+    );
+  }
+
+  function remove(m: Member) {
+    if (m.pending) {
+      revokeMut.mutate(
+        { inviteId: m.userId },
+        {
+          onSuccess: () => showToast({ text: `Invite to ${m.email} revoked`, variant: "warn" }),
+          onError: (e) => showToast({ text: (e as Error).message, variant: "warn" }),
+        },
+      );
+      return;
+    }
+    removeMut.mutate(
+      { userId: m.userId },
+      {
+        onSuccess: () => showToast({ text: "Member removed from workspace", variant: "warn" }),
+        onError: (e) => showToast({ text: (e as Error).message, variant: "warn" }),
+      },
+    );
   }
 
   return (
     <>
       <div className="db-toolbar">
-        <span className="db-mono db-muted">{members.length} members</span>
+        <span className="db-mono db-muted">
+          {members.length} members{invites && invites.length > 0 ? ` · ${invites.length} invited` : ""}
+        </span>
         <div className="db-toolbar-r">
           <input
             className="db-input"
@@ -230,37 +240,40 @@ function MembersTab({ showToast }: { showToast: (m: { text: string; variant?: "o
       <div className="db-table-wrap">
         <table className="db-table">
           <thead>
-            <tr><th>Member</th><th>Email</th><th>Role</th><th>Last active</th><th></th></tr>
+            <tr><th>Member</th><th>Email</th><th>Role</th><th>Joined</th><th></th></tr>
           </thead>
           <tbody>
-            {members.map((m) => (
-              <tr key={m.email}>
-                <td className="db-cell-primary">
-                  <span className="db-member"><span className="db-member-av">{m.init}</span>{m.name}</span>
-                </td>
-                <td className="db-mono db-muted">{m.email}</td>
-                <td>
-                  <button
-                    className="db-role-pill-btn"
-                    style={{ border: "none", background: "none", padding: 0, cursor: m.role === "owner" ? "default" : "pointer" }}
-                    onClick={() => cycleRole(m.email)}
-                    title={m.role === "owner" ? "Owner role can't be changed here" : "Click to change role"}
-                  >
-                    <span className={"db-role-pill " + m.role}>{m.role}</span>
-                  </button>
-                </td>
-                <td className="db-mono db-muted">{m.active}</td>
-                <td>
-                  {m.role === "owner" ? (
-                    <span className="db-icon-mini" style={{ opacity: 0.3, cursor: "default" }}><Icon name="lock" size={14} /></span>
-                  ) : (
-                    <button className="db-icon-mini danger" onClick={() => remove(m.email)} title="Remove member">
-                      <Icon name="trash" size={15} />
+            {rows.map((m) => {
+              const locked = m.role === "owner" || m.pending;
+              return (
+                <tr key={m.userId} style={m.pending ? { opacity: 0.7 } : undefined}>
+                  <td className="db-cell-primary">
+                    <span className="db-member"><span className="db-member-av">{m.init}</span>{m.name}</span>
+                  </td>
+                  <td className="db-mono db-muted">{m.email}</td>
+                  <td>
+                    <button
+                      className="db-role-pill-btn"
+                      style={{ border: "none", background: "none", padding: 0, cursor: locked ? "default" : "pointer" }}
+                      onClick={() => cycleRole(m)}
+                      title={m.role === "owner" ? "Owner role can't be changed here" : m.pending ? "Pending invite" : "Click to change role"}
+                    >
+                      <span className={"db-role-pill " + m.role}>{m.role}</span>
                     </button>
-                  )}
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="db-mono db-muted">{m.active}</td>
+                  <td>
+                    {m.role === "owner" ? (
+                      <span className="db-icon-mini" style={{ opacity: 0.3, cursor: "default" }}><Icon name="lock" size={14} /></span>
+                    ) : (
+                      <button className="db-icon-mini danger" onClick={() => remove(m)} title={m.pending ? "Revoke invite" : "Remove member"}>
+                        <Icon name="trash" size={15} />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -277,6 +290,134 @@ function MembersTab({ showToast }: { showToast: (m: { text: string; variant?: "o
             </div>
           ))}
         </div>
+      </div>
+    </>
+  );
+}
+
+// ── Teams / business units ───────────────────────────────────────────────────
+function flattenTeams(nodes: TeamNode[], depth = 0): { node: TeamNode; depth: number }[] {
+  return nodes.flatMap((n) => [{ node: n, depth }, ...flattenTeams(n.children, depth + 1)]);
+}
+
+function TeamsTab({ showToast }: { showToast: (m: { text: string; variant?: "ok" | "warn" }) => void }) {
+  const { data: tree = [] } = useTeams();
+  const { data: members = [] } = useMembers();
+  const createMut = useCreateTeam();
+  const deleteMut = useDeleteTeam();
+  const addMut = useAddTeamMember();
+  const removeMut = useRemoveTeamMember();
+  const [name, setName] = useState("");
+  const [parentId, setParentId] = useState("");
+
+  const flat = flattenTeams(tree);
+  const assignable = members.filter((m) => !m.pending);
+
+  function create() {
+    const n = name.trim();
+    if (!n) { showToast({ text: "Name the team first", variant: "warn" }); return; }
+    setName("");
+    createMut.mutate(
+      { name: n, parentId: parentId || null },
+      {
+        onSuccess: () => showToast({ text: `Team "${n}" created` }),
+        onError: (e) => showToast({ text: (e as Error).message, variant: "warn" }),
+      },
+    );
+  }
+  function del(t: TeamNode) {
+    deleteMut.mutate(
+      { teamId: t.id },
+      {
+        onSuccess: () => showToast({ text: `Team "${t.name}" deleted`, variant: "warn" }),
+        onError: (e) => showToast({ text: (e as Error).message, variant: "warn" }),
+      },
+    );
+  }
+  function addMember(teamId: string, userId: string) {
+    if (!userId) return;
+    addMut.mutate({ teamId, userId }, { onError: (e) => showToast({ text: (e as Error).message, variant: "warn" }) });
+  }
+  function removeMember(teamId: string, userId: string) {
+    removeMut.mutate({ teamId, userId }, { onError: (e) => showToast({ text: (e as Error).message, variant: "warn" }) });
+  }
+
+  return (
+    <>
+      <div className="db-callout">
+        <Icon name="git-branch" size={16} />
+        <span>
+          <b>Org structure.</b> Group members into teams and business units. Teams nest — a
+          parent team contains sub-teams. This organizes people; data access stays governed by
+          roles in <b>Members &amp; RBAC</b>.
+        </span>
+      </div>
+
+      <div className="db-toolbar">
+        <div className="db-toolbar-r" style={{ marginLeft: 0 }}>
+          <input
+            className="db-input"
+            style={{ marginBottom: 0, width: 200 }}
+            placeholder="new team name…"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") create(); }}
+          />
+          <select className="db-input" style={{ marginBottom: 0 }} value={parentId} onChange={(e) => setParentId(e.target.value)}>
+            <option value="">— top level —</option>
+            {flat.map(({ node, depth }) => (
+              <option key={node.id} value={node.id}>{" ".repeat(depth * 2)}{node.name}</option>
+            ))}
+          </select>
+          <Button variant="primary" icon="plus" onClick={create}>New team</Button>
+        </div>
+      </div>
+
+      <div className="db-panel" style={{ padding: 0 }}>
+        {flat.length === 0 && (
+          <div className="db-mono db-muted" style={{ padding: 16 }}>No teams yet — create one above.</div>
+        )}
+        {flat.map(({ node, depth }) => (
+          <div
+            key={node.id}
+            style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "10px 14px", paddingLeft: 14 + depth * 22,
+              borderTop: "1px solid rgba(0,0,0,0.06)",
+            }}
+          >
+            <Icon name={node.children.length ? "folder" : "users"} size={15} />
+            <span className="db-cell-primary" style={{ minWidth: 130 }}>{node.name}</span>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, flex: 1 }}>
+              {node.members.map((mem) => (
+                <span key={mem.userId} className="db-member" style={{ gap: 5 }}>
+                  <span className="db-member-av" style={{ width: 20, height: 20, fontSize: 10 }}>{mem.init}</span>
+                  {mem.name}
+                  <button className="db-icon-mini" style={{ marginLeft: 2 }} title="Remove from team" onClick={() => removeMember(node.id, mem.userId)}>
+                    <Icon name="x" size={12} />
+                  </button>
+                </span>
+              ))}
+              {node.members.length === 0 && (
+                <span className="db-mono db-muted" style={{ fontSize: 12 }}>no members</span>
+              )}
+            </div>
+            <select
+              className="db-input"
+              style={{ marginBottom: 0, width: 150 }}
+              value=""
+              onChange={(e) => addMember(node.id, e.target.value)}
+            >
+              <option value="">+ add member…</option>
+              {assignable.map((m) => (
+                <option key={m.userId} value={m.userId}>{m.name}</option>
+              ))}
+            </select>
+            <button className="db-icon-mini danger" title="Delete team" onClick={() => del(node)}>
+              <Icon name="trash" size={15} />
+            </button>
+          </div>
+        ))}
       </div>
     </>
   );
