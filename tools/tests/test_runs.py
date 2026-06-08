@@ -230,6 +230,29 @@ async def test_run_finished_handler_finalizes(test_org, client, fresh_bus):
     assert [c["name"] for c in calls] == ["do_it"]
 
 
+async def test_run_finished_failed_notifies(test_org, client, fresh_bus):
+    """A failed run fans out a 'run.failed' notification inline (best-effort)."""
+    from synapse_cloud.notifications.base import FakeNotifier, set_notifier
+
+    notifier = FakeNotifier()
+    set_notifier(notifier)
+
+    daemon_id, _ = await test_org.make_daemon()
+    agent_id = await _make_agent(test_org.org_id, daemon_id=daemon_id)
+    run_id = (
+        await client.post(f"/agents/{agent_id}/runs", json={}, headers=test_org.auth_headers())
+    ).json()["id"]
+
+    await dispatch(
+        RUN_FINISHED,
+        MessageContext(daemon_id=daemon_id, org_id=test_org.org_id, run_id=run_id, agent_id=agent_id),
+        {"status": "failed", "exit_code": 1, "error": "boom"},
+    )
+    assert any(
+        s.event == "run.failed" and s.payload.get("run_id") == run_id for s in notifier.sent
+    )
+
+
 async def test_run_finished_handler_org_scoped(make_test_org, client, fresh_bus):
     org_a = await make_test_org()
     org_b = await make_test_org()

@@ -497,17 +497,6 @@ async def run_all_detectors(
 
 
 # ── Autodiscovery hooks ──────────────────────────────────────────────────────
-tasks = [
-    detect_cost_spike,
-    detect_latency_regression,
-    detect_error_rate_spike,
-    detect_token_blowup,
-    detect_silence,
-    detect_daemon_offline,
-    detect_injection_spike,
-    run_all_detectors,
-]
-
 periodic_jobs = [
     # Sweep all detectors across all orgs every 5 minutes.
     PeriodicJob("anomaly.run_all_detectors", run_all_detectors, 300),

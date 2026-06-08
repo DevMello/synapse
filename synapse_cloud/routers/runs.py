@@ -34,6 +34,7 @@ from ..command_bus import get_command_bus
 from ..db import service_db
 from ..deps import Principal, get_principal, require_write
 from ..message_registry import RUN_FINISHED, MessageContext, on_daemon_message
+from ..notifications.base import get_notifier
 
 router = APIRouter(tags=["runs"])
 
@@ -316,14 +317,33 @@ async def handle_run_finished(ctx: MessageContext, payload: dict[str, Any]) -> N
         updates["redaction_summary"] = payload["redaction_summary"]
 
     db = await service_db()
-    await (
-        db.table("runs")
+    updated = (
+        await db.table("runs")
         .update(updates)
         .eq("org_id", ctx.org_id)
         .eq("id", run_id)
         .execute()
-    )
+    ).data or []
 
     tool_calls = payload.get("tool_calls")
     if tool_calls:
         await record_tool_calls(ctx.org_id, run_id, tool_calls)
+
+    # Reactive notification: a failed/interrupted run fans out to the org's channels
+    # (Slack/Discord/Email) inline, best-effort. Routing rules can target "run.failed".
+    if updates["status"] in ("failed", "interrupted"):
+        row = updated[0] if updated else {}
+        try:
+            await get_notifier().notify(
+                ctx.org_id,
+                "run.failed",
+                {
+                    "run_id": run_id,
+                    "agent_id": row.get("agent_id") or payload.get("agent_id"),
+                    "status": updates["status"],
+                    "exit_code": payload.get("exit_code"),
+                    "error": payload.get("error"),
+                },
+            )
+        except Exception:  # noqa: BLE001 - notification is best-effort; never block finalization
+            pass

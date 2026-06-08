@@ -246,8 +246,6 @@ async def compute_cost_rollups(
 
 
 # ── Autodiscovery hooks ──────────────────────────────────────────────────────
-tasks = [compute_metric_rollups, compute_cost_rollups]
-
 periodic_jobs = [
     # Minute-grain metric rollups every minute; hourly cost rollups on the hour.
     PeriodicJob("rollups.compute_metric_rollups", compute_metric_rollups, 60),
