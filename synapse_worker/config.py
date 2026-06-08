@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     max_memory_mb: int = 0   # 0 => unbounded
     cpu_quota: float = 0.0   # 0 => unbounded
 
+    # Agent orchestration: the cloud's ed25519 public key (base64) used to verify
+    # signed grants offline. Empty => orchestration grants cannot be verified.
+    grant_public_key: str = ""
+
     # Guardrail defaults (per-agent config overrides these)
     redaction_enabled: bool = True
     injection_guard_enabled: bool = True

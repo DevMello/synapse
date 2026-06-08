@@ -83,6 +83,55 @@ export type Database = {
           },
         ]
       }
+      agent_identities: {
+        Row: {
+          agent_id: string
+          created_at: string
+          id: string
+          org_id: string
+          public_key: string | null
+          rotated_at: string | null
+        }
+        Insert: {
+          agent_id: string
+          created_at?: string
+          id?: string
+          org_id: string
+          public_key?: string | null
+          rotated_at?: string | null
+        }
+        Update: {
+          agent_id?: string
+          created_at?: string
+          id?: string
+          org_id?: string
+          public_key?: string | null
+          rotated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_identities_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: true
+            referencedRelation: "agent_overview"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_identities_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: true
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_identities_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agent_memory: {
         Row: {
           agent_id: string
@@ -195,6 +244,106 @@ export type Database = {
           },
           {
             foreignKeyName: "agent_memory_rollups_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_orchestration_grants: {
+        Row: {
+          agent_id: string
+          created_at: string
+          daemon_id: string
+          expires_at: string
+          granted_by: string | null
+          id: string
+          key_id: string | null
+          max_depth: number
+          max_fan_out: number
+          org_id: string
+          protected_fields: string[]
+          revoked_at: string | null
+          signature: string | null
+          target_allow: string[]
+          tree_budget_usd: number
+          verbs: string[]
+        }
+        Insert: {
+          agent_id: string
+          created_at?: string
+          daemon_id: string
+          expires_at: string
+          granted_by?: string | null
+          id?: string
+          key_id?: string | null
+          max_depth?: number
+          max_fan_out?: number
+          org_id: string
+          protected_fields?: string[]
+          revoked_at?: string | null
+          signature?: string | null
+          target_allow?: string[]
+          tree_budget_usd?: number
+          verbs?: string[]
+        }
+        Update: {
+          agent_id?: string
+          created_at?: string
+          daemon_id?: string
+          expires_at?: string
+          granted_by?: string | null
+          id?: string
+          key_id?: string | null
+          max_depth?: number
+          max_fan_out?: number
+          org_id?: string
+          protected_fields?: string[]
+          revoked_at?: string | null
+          signature?: string | null
+          target_allow?: string[]
+          tree_budget_usd?: number
+          verbs?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_orchestration_grants_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agent_overview"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_orchestration_grants_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_orchestration_grants_daemon_id_fkey"
+            columns: ["daemon_id"]
+            isOneToOne: false
+            referencedRelation: "daemon_overview"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_orchestration_grants_daemon_id_fkey"
+            columns: ["daemon_id"]
+            isOneToOne: false
+            referencedRelation: "daemons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_orchestration_grants_granted_by_fkey"
+            columns: ["granted_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_orchestration_grants_org_id_fkey"
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
@@ -1720,12 +1869,17 @@ export type Database = {
           cost_usd: number
           created_at: string
           daemon_id: string | null
+          depth: number
           ended_at: string | null
           exit_code: number | null
           id: string
           idempotency_key: string | null
+          initiator: string
+          initiator_agent_id: string | null
           org_id: string
+          parent_run_id: string | null
           redaction_summary: Json | null
+          root_run_id: string | null
           started_at: string | null
           status: Database["public"]["Enums"]["run_status"]
           tokens_in: number
@@ -1738,12 +1892,17 @@ export type Database = {
           cost_usd?: number
           created_at?: string
           daemon_id?: string | null
+          depth?: number
           ended_at?: string | null
           exit_code?: number | null
           id?: string
           idempotency_key?: string | null
+          initiator?: string
+          initiator_agent_id?: string | null
           org_id: string
+          parent_run_id?: string | null
           redaction_summary?: Json | null
+          root_run_id?: string | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["run_status"]
           tokens_in?: number
@@ -1756,12 +1915,17 @@ export type Database = {
           cost_usd?: number
           created_at?: string
           daemon_id?: string | null
+          depth?: number
           ended_at?: string | null
           exit_code?: number | null
           id?: string
           idempotency_key?: string | null
+          initiator?: string
+          initiator_agent_id?: string | null
           org_id?: string
+          parent_run_id?: string | null
           redaction_summary?: Json | null
+          root_run_id?: string | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["run_status"]
           tokens_in?: number
@@ -1795,6 +1959,20 @@ export type Database = {
             columns: ["daemon_id"]
             isOneToOne: false
             referencedRelation: "daemons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "runs_initiator_agent_id_fkey"
+            columns: ["initiator_agent_id"]
+            isOneToOne: false
+            referencedRelation: "agent_overview"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "runs_initiator_agent_id_fkey"
+            columns: ["initiator_agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
             referencedColumns: ["id"]
           },
           {

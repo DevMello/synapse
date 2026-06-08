@@ -25,6 +25,7 @@ const MemoryTab = lazy(() => import("./tabs/Memory"));
 const RunsTab = lazy(() => import("./tabs/Runs"));
 const LogsTab = lazy(() => import("./tabs/Logs"));
 const AnalyticsTab = lazy(() => import("./tabs/Analytics"));
+const OrchestrationTab = lazy(() => import("./tabs/Orchestration"));
 
 interface TabDef { id: string; name: string; icon: string; Component: LazyExoticComponent<ComponentType> }
 
@@ -38,6 +39,7 @@ const AGENT_TABS: TabDef[] = [
   { id: "env", name: "Environment", icon: "key", Component: EnvironmentTab },
   { id: "memory", name: "Memory", icon: "brain", Component: MemoryTab },
   { id: "runs", name: "Runs", icon: "activity", Component: RunsTab },
+  { id: "orchestration", name: "Orchestration", icon: "git-branch", Component: OrchestrationTab },
   { id: "logs", name: "Logs", icon: "terminal", Component: LogsTab },
   { id: "analytics", name: "Analytics", icon: "gauge", Component: AnalyticsTab },
 ];

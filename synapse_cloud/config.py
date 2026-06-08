@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     # WebSocket daemon hub
     hub_node_id: str = "local"
 
+    # Agent-orchestration grant signing (ed25519). grant_signing_key is a base64
+    # 32-byte seed; empty => a deterministic dev/test key (NOT for production).
+    grant_signing_key: str = ""
+    grant_key_id: str = "k1"
+
     # Async workers
     redis_url: str = "redis://localhost:6379"
 

@@ -24,6 +24,8 @@ export {
 export {
   useTeams, useCreateTeam, useDeleteTeam, useAddTeamMember, useRemoveTeamMember,
 } from "./queries/teams";
+export { useOrchestrationGrants, useMintGrant, useRevokeGrant } from "./queries/grants";
+export { useAgentLineage } from "./queries/lineage";
 
 // Synchronous accessor for components that need the busy-fleet snapshot (e.g.
 // cross-referencing an agent's host daemon) without a hook subscription. Screen-
