@@ -6,10 +6,9 @@ Each row carries count/sum/min/max/avg/p95/ewma so the Web UI and the anomaly
 detectors can read cheap pre-aggregated series instead of scanning raw
 partitions.
 
-Autodiscovery: this module exposes module-level ``tasks`` / ``cron_jobs`` lists
-which `synapse_cloud.workers.__init__` aggregates into ``WorkerSettings``. The
-task functions are plain ``async def fn(ctx, ...)`` so tests can call them
-directly with ``ctx=None`` (no running Redis required).
+Autodiscovery: this module exposes a module-level ``periodic_jobs`` list which the
+in-process ``synapse_cloud.scheduler`` aggregates and runs (no Redis). The functions
+are plain ``async def fn(ctx=None)`` so tests can call them directly.
 """
 from __future__ import annotations
 
@@ -17,7 +16,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
 
-from arq.cron import cron
+from ..scheduler import PeriodicJob
 
 from ..db import service_db
 
@@ -249,8 +248,8 @@ async def compute_cost_rollups(
 # ── Autodiscovery hooks ──────────────────────────────────────────────────────
 tasks = [compute_metric_rollups, compute_cost_rollups]
 
-cron_jobs = [
+periodic_jobs = [
     # Minute-grain metric rollups every minute; hourly cost rollups on the hour.
-    cron(compute_metric_rollups, minute=set(range(60)), run_at_startup=False),
-    cron(compute_cost_rollups, minute={0}, run_at_startup=False),
+    PeriodicJob("rollups.compute_metric_rollups", compute_metric_rollups, 60),
+    PeriodicJob("rollups.compute_cost_rollups", compute_cost_rollups, 3600),
 ]

@@ -27,9 +27,6 @@ class Settings(BaseSettings):
     grant_signing_key: str = ""
     grant_key_id: str = "k1"
 
-    # Async workers
-    redis_url: str = "redis://localhost:6379"
-
     # Runtime
     synapse_env: str = "dev"      # "test" => use in-memory fakes for side-effects
     web_ui_dist: str = ""         # path to built Web UI bundle (static mount)

@@ -15,8 +15,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from arq import cron
-
+from ..scheduler import PeriodicJob
 from ..command_bus import get_command_bus
 from ..db import service_db
 from ..notifications.base import get_notifier
@@ -93,4 +92,4 @@ async def sweep_expired_hitl(ctx: Optional[dict] = None) -> int:
 
 
 tasks = [deliver_notification]
-cron_jobs = [cron(sweep_expired_hitl, minute=set(range(60)))]
+periodic_jobs = [PeriodicJob("notify.sweep_expired_hitl", sweep_expired_hitl, 60)]

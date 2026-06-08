@@ -23,3 +23,7 @@ Thumbs.db
 
 # Agent worktrees
 .claude/worktrees/
+
+# Personal root-level script (anchored so it doesn't ignore package modules like
+# synapse_cloud/scheduler.py)
+/scheduler.py
