@@ -79,6 +79,37 @@ export interface Run {
   cost: number;
   tokens: number;
   exit: string;
+  // Orchestration lineage (possible-features §2): who initiated this run + its
+  // position in an orchestration tree.
+  initiator?: "human" | "schedule" | "webhook" | "agent";
+  initiatorAgentId?: string;
+  rootRunId?: string;
+  parentRunId?: string;
+  depth?: number;
+}
+
+// ── agent orchestration grants (§2.3) ────────────────────────────────────────
+export type GrantVerb = "run" | "create" | "edit";
+
+export interface Grant {
+  id: string;
+  agentId: string;
+  daemonId: string;
+  verbs: GrantVerb[];
+  targetAllow: string[];
+  maxDepth: number;
+  maxFanOut: number;
+  treeBudgetUsd: number;
+  expiresAt: string; // relative
+  revoked: boolean;
+  grantedBy: string;
+  created: string; // relative
+}
+
+// A node in an orchestration lineage tree (a run + its agent-spawned children).
+export interface RunLineage {
+  run: Run;
+  children: RunLineage[];
 }
 
 export type Severity = "block" | "require-approval" | "warn";
