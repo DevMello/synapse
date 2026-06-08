@@ -61,9 +61,23 @@ def create_app() -> FastAPI:
 
     dist = settings.web_ui_dist
     if dist and Path(dist).is_dir():
+        from fastapi.responses import FileResponse
         from fastapi.staticfiles import StaticFiles
 
-        app.mount("/", StaticFiles(directory=dist, html=True), name="web-ui")
+        dist_path = Path(dist)
+
+        # Serve the built asset chunks (JS, CSS, sourcemaps) from /assets.
+        if (dist_path / "assets").is_dir():
+            app.mount("/assets", StaticFiles(directory=dist_path / "assets"), name="web-ui-assets")
+
+        # Catch-all: serve root-level static files (favicon, manifest, …) by path,
+        # and fall back to index.html for every SPA route so Ctrl+R works on deep URLs.
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def _spa_fallback(full_path: str) -> FileResponse:
+            candidate = dist_path / full_path
+            if candidate.is_file():
+                return FileResponse(candidate)
+            return FileResponse(dist_path / "index.html")
 
     return app
 
