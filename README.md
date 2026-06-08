@@ -110,8 +110,10 @@ synapse/
 
 - **Python 3.10+** (the worker targets 3.11+).
 - A **Supabase** project (the schema lives in `tools/supabase/migrations/`).
-- **Redis** (for the cloud's Arq async workers).
 - [`uv`](https://github.com/astral-sh/uv) recommended for installs.
+
+> Background jobs (heartbeat sweep, telemetry rollups, anomaly detection, notifications)
+> run **in-process** via the app lifespan scheduler — no Redis, no separate worker process.
 
 ### 1. Install
 
@@ -127,7 +129,7 @@ uv pip install -e ".[worker,dev]"
 
 ```bash
 cp .env.example .env
-# Fill in SUPABASE_SERVICE_ROLE_KEY, set a real DAEMON_JWT_SECRET, point REDIS_URL at Redis.
+# Fill in SUPABASE_SERVICE_ROLE_KEY and set a real DAEMON_JWT_SECRET.
 ```
 
 Key environment variables (see `.env.example`):
@@ -136,18 +138,15 @@ Key environment variables (see `.env.example`):
 |-----|---------|
 | `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` | Supabase project + keys |
 | `DAEMON_JWT_SECRET` | signs daemon device-code access tokens (HS256) |
-| `REDIS_URL` | Arq async worker queue |
+| `GRANT_SIGNING_KEY` | ed25519 seed for signing agent-orchestration grants (daemon verifies with the matching public key) |
 | `SYNAPSE_ENV` | `dev` / `test` (`test` fakes outbound side-effects) |
 | `WEB_UI_DIST` | path to a built Web UI bundle to serve from the same origin |
 
 ### 3. Run the Cloud Backend
 
 ```bash
-# Web app + WebSocket daemon hub (one process)
+# Web app + WebSocket daemon hub + in-process periodic scheduler — one process, no Redis.
 uvicorn synapse_cloud.app:create_app --factory --reload
-
-# Async workers (separate process)
-arq synapse_cloud.workers.WorkerSettings
 ```
 
 ### 4. Run a worker daemon

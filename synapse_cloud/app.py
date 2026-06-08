@@ -4,9 +4,10 @@ Routers are autodiscovered: every module under `synapse_cloud.routers` that
 exposes a module-level `router` (an `APIRouter`) is included automatically, so
 feature units never edit this file — they drop a router module and it appears.
 
-The lifespan starts/stops the WebSocket daemon hub (overridden by unit 2) so the
-hub shares the app process. The Arq worker runs as a separate process
-(`arq synapse_cloud.workers.WorkerSettings`), not in the web app.
+The lifespan starts/stops the WebSocket daemon hub AND the in-process periodic-job
+scheduler (heartbeat sweep, rollups, anomaly, notifications) — so the whole backend
+is just `uvicorn` + Supabase, with no separate worker process and no Redis. The
+scheduler is skipped under SYNAPSE_ENV=test.
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ from fastapi import APIRouter, FastAPI
 
 from . import ws_hub
 from .config import get_settings
+from .scheduler import Scheduler, discover_periodic_jobs
 
 
 def _discover_routers() -> list[APIRouter]:
@@ -38,9 +40,15 @@ def _discover_routers() -> list[APIRouter]:
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     await ws_hub.startup(app)
+    scheduler: Scheduler | None = None
+    if not get_settings().is_test:
+        scheduler = Scheduler(discover_periodic_jobs())
+        await scheduler.start()
     try:
         yield
     finally:
+        if scheduler is not None:
+            await scheduler.stop()
         await ws_hub.shutdown(app)
 
 

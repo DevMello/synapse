@@ -5,16 +5,16 @@ heartbeats. When a daemon dies, its lease expires; this worker sweeps stale
 presence rows and marks the daemon's in-flight runs ``interrupted`` and the
 daemon ``offline`` so an operator can ``run.recover`` them onto another daemon.
 
-Autodiscovery: exposes module-level ``tasks`` / ``cron_jobs`` which
-``synapse_cloud.workers.__init__`` aggregates into ``WorkerSettings`` — no shared
-file is edited. The task function is a plain ``async def fn(ctx, ...)`` so tests
-can call ``sweep_interrupted_runs(ctx=None)`` directly with no running Redis.
+Autodiscovery: exposes a module-level ``periodic_jobs`` list which the in-process
+``synapse_cloud.scheduler`` aggregates and runs — no shared file is edited, no Redis.
+The function is a plain ``async def fn(ctx=None)`` so tests can call
+``sweep_interrupted_runs(ctx=None)`` directly.
 """
 from __future__ import annotations
 
 from typing import Any, Optional
 
-from arq.cron import cron
+from ..scheduler import PeriodicJob
 
 from ..db import service_db
 from ..services.recovery import sweep_interrupted_runs as _sweep_core
@@ -34,7 +34,7 @@ async def sweep_interrupted_runs(ctx: Optional[dict] = None) -> dict[str, Any]:
 # ── Autodiscovery hooks ──────────────────────────────────────────────────────
 tasks = [sweep_interrupted_runs]
 
-cron_jobs = [
-    # Sweep for dead daemons every 30 seconds (on the :00 and :30 marks).
-    cron(sweep_interrupted_runs, second={0, 30}, run_at_startup=False),
+periodic_jobs = [
+    # Sweep for dead daemons every 30 seconds.
+    PeriodicJob("heartbeat.sweep_interrupted_runs", sweep_interrupted_runs, 30),
 ]

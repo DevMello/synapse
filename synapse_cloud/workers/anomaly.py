@@ -21,7 +21,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from arq.cron import cron
+from ..scheduler import PeriodicJob
 
 from ..db import service_db
 from ..notifications.base import get_notifier
@@ -508,7 +508,7 @@ tasks = [
     run_all_detectors,
 ]
 
-cron_jobs = [
+periodic_jobs = [
     # Sweep all detectors across all orgs every 5 minutes.
-    cron(run_all_detectors, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}, run_at_startup=False),
+    PeriodicJob("anomaly.run_all_detectors", run_all_detectors, 300),
 ]
