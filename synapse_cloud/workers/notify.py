@@ -1,13 +1,14 @@
-"""Async delivery + HITL timeout sweeper (Arq tasks/cron).
+"""HITL timeout sweeper (periodic job).
 
-`deliver_notification` is an Arq task that pushes a single event through the
-configured notifier off the request path. `sweep_expired_hitl` is a cron job
-(default every minute) that enforces the HITL *default-deny* policy: any pending
+`sweep_expired_hitl` enforces the HITL *default-deny* policy: any pending
 `hitl_requests` row past its `expires_at` is flipped to 'expired' and a denied
-`hitl.resolve` command is sent back to the originating daemon.
+`hitl.resolve` command is sent back to the originating daemon. It runs every minute
+via the in-process scheduler and is a plain async function so tests can call it
+directly.
 
-Both are plain async functions so tests can call them directly without Redis.
-Arq passes a context dict as the first arg, so it is accepted and ignored.
+Event-driven notification *delivery* is inline at the emit sites (HITL create §hitl,
+anomaly §anomaly, run failure §runs) via ``get_notifier().notify(...)`` — not a queued
+task.
 """
 from __future__ import annotations
 
@@ -18,21 +19,8 @@ from typing import Any, Optional
 from ..scheduler import PeriodicJob
 from ..command_bus import get_command_bus
 from ..db import service_db
-from ..notifications.base import get_notifier
 
 log = logging.getLogger("synapse.workers.notify")
-
-
-async def deliver_notification(
-    ctx: Optional[dict],
-    org_id: str,
-    event: str,
-    payload: dict[str, Any],
-    *,
-    channels: Optional[list[str]] = None,
-) -> None:
-    """Arq task: deliver one event via the configured notifier."""
-    await get_notifier().notify(org_id, event, payload, channels=channels)
 
 
 async def sweep_expired_hitl(ctx: Optional[dict] = None) -> int:
@@ -91,5 +79,4 @@ async def sweep_expired_hitl(ctx: Optional[dict] = None) -> int:
     return expired
 
 
-tasks = [deliver_notification]
 periodic_jobs = [PeriodicJob("notify.sweep_expired_hitl", sweep_expired_hitl, 60)]

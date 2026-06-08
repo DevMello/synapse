@@ -32,8 +32,6 @@ async def sweep_interrupted_runs(ctx: Optional[dict] = None) -> dict[str, Any]:
 
 
 # ── Autodiscovery hooks ──────────────────────────────────────────────────────
-tasks = [sweep_interrupted_runs]
-
 periodic_jobs = [
     # Sweep for dead daemons every 30 seconds.
     PeriodicJob("heartbeat.sweep_interrupted_runs", sweep_interrupted_runs, 30),
