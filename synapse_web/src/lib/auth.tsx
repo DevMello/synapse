@@ -6,48 +6,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "./supabase";
 import { SignInPage } from "../components/auth/SignInPage";
+import { SignUpPage } from "../components/auth/SignUpPage";
 import { MfaPage } from "../components/auth/MfaPage";
-import { AuthShell } from "../components/auth/AuthShell";
-
-// Stub placeholder — Unit 2 will replace this with the real sign-up page.
-function SignUpPage({ onSignIn }: { onSignIn: () => void }) {
-  return (
-    <AuthShell>
-      <div style={{ textAlign: "center", padding: "8px 0 16px" }}>
-        <h1
-          style={{
-            margin: "0 0 10px",
-            fontSize: 22,
-            fontWeight: 500,
-            letterSpacing: "-0.02em",
-            color: "var(--ink)",
-          }}
-        >
-          Create account
-        </h1>
-        <p style={{ margin: "0 0 20px", fontSize: 13.5, color: "var(--mute)" }}>
-          Sign-up coming soon.
-        </p>
-        <button
-          type="button"
-          onClick={onSignIn}
-          style={{
-            background: "none",
-            border: "none",
-            padding: 0,
-            color: "var(--accent)",
-            fontWeight: 600,
-            fontSize: 13.5,
-            cursor: "pointer",
-            fontFamily: "var(--font-sans)",
-          }}
-        >
-          ← Back to sign in
-        </button>
-      </div>
-    </AuthShell>
-  );
-}
 
 type AuthView = "signin" | "signup" | "mfa";
 
