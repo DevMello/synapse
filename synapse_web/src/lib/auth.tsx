@@ -5,6 +5,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "./supabase";
+import { ensureSessionSigningKey, getPublicKeyBase64, clearSessionSigningKey } from "./commandSigning";
+import { apiPost } from "../api/client";
 import { SignInPage } from "../components/auth/SignInPage";
 import { SignUpPage } from "../components/auth/SignUpPage";
 import { MfaPage } from "../components/auth/MfaPage";
@@ -34,12 +36,23 @@ function RequireSession({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     supabase!.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: sub } = supabase!.auth.onAuthStateChange((_e, s) => {
+    const { data: sub } = supabase!.auth.onAuthStateChange((event, s) => {
       setSession(s);
-      // If the session drops to null while on a non-signin view (e.g. SIGNED_OUT
-      // event from another tab), reset to the sign-in screen so the user isn't
-      // left stuck on the MFA or sign-up view.
-      if (!s) setView("signin");
+      if (s && (event === "SIGNED_IN" || event === "INITIAL_SESSION")) {
+        // Register once per new session — not on every TOKEN_REFRESHED event.
+        void (async () => {
+          try {
+            await ensureSessionSigningKey();
+            const public_key = await getPublicKeyBase64();
+            await apiPost("/auth/command-key", { public_key });
+          } catch {
+            // non-fatal — command signing degrades gracefully
+          }
+        })();
+      } else if (!s) {
+        clearSessionSigningKey();
+        setView("signin");
+      }
     });
     return () => sub.subscription.unsubscribe();
   }, []);
