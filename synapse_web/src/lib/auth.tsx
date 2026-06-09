@@ -2,12 +2,14 @@
 // return zero rows without a session. This gate ensures a Supabase session before
 // the app shell mounts. In mock mode (no Supabase configured) it renders straight
 // through so the app still boots on mock data for design/CI work.
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "./supabase";
+import { SignInPage } from "../components/auth/SignInPage";
 import { SignUpPage } from "../components/auth/SignUpPage";
+import { MfaPage } from "../components/auth/MfaPage";
 
-type AuthView = "signin" | "signup";
+type AuthView = "signin" | "signup" | "mfa";
 
 export function AuthGate({ children }: { children: ReactNode }) {
   if (!isSupabaseConfigured || !supabase) return <>{children}</>;
@@ -17,72 +19,42 @@ export function AuthGate({ children }: { children: ReactNode }) {
 function RequireSession({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [view, setView] = useState<AuthView>("signin");
+  const [mfaEmail, setMfaEmail] = useState("");
 
   useEffect(() => {
     supabase!.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: sub } = supabase!.auth.onAuthStateChange((_e, s) => setSession(s));
+    const { data: sub } = supabase!.auth.onAuthStateChange((_e, s) => {
+      setSession(s);
+      // If the session drops to null while on a non-signin view (e.g. SIGNED_OUT
+      // event from another tab), reset to the sign-in screen so the user isn't
+      // left stuck on the MFA or sign-up view.
+      if (!s) setView("signin");
+    });
     return () => sub.subscription.unsubscribe();
   }, []);
 
   if (session === undefined) {
     return <div className="db-mono db-muted" style={{ padding: 40 }}>Loading…</div>;
   }
-  if (session === null) {
-    if (view === "signup") return <SignUpPage onSignIn={() => setView("signin")} />;
-    return <SignIn onSignUp={() => setView("signup")} />;
-  }
-  return <>{children}</>;
-}
 
-function SignIn({ onSignUp }: { onSignUp?: () => void }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  if (session !== null) return <>{children}</>;
 
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setErr(null);
-    const { error } = await supabase!.auth.signInWithPassword({ email, password });
-    if (error) setErr(error.message);
-    setBusy(false);
+  if (view === "signin") {
+    return (
+      <SignInPage
+        onSignUp={() => setView("signup")}
+        onMfaRequired={(email) => {
+          setMfaEmail(email);
+          setView("mfa");
+        }}
+      />
+    );
   }
 
-  return (
-    <div style={{ display: "grid", placeItems: "center", minHeight: "100vh" }}>
-      <form onSubmit={submit} className="db-card" style={{ width: 320, padding: 24, display: "grid", gap: 12 }}>
-        <h1 className="db-mono" style={{ fontSize: 18 }}>Synapse</h1>
-        <input className="db-input" type="email" placeholder="email" value={email}
-          onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
-        <input className="db-input" type="password" placeholder="password" value={password}
-          onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
-        {err && <div className="db-mono" style={{ color: "var(--db-danger, #e5484d)", fontSize: 12 }}>{err}</div>}
-        <button className="db-btn db-btn-primary" type="submit" disabled={busy}>
-          {busy ? "Signing in…" : "Sign in"}
-        </button>
-        {onSignUp && (
-          <div style={{ textAlign: "center", fontSize: 13, color: "var(--mute)" }}>
-            Don't have an account?{" "}
-            <button
-              type="button"
-              onClick={onSignUp}
-              style={{
-                background: "none",
-                border: "none",
-                color: "var(--accent)",
-                cursor: "pointer",
-                fontWeight: 600,
-                fontSize: 13,
-                padding: 0,
-                fontFamily: "inherit",
-              }}
-            >
-              Create account
-            </button>
-          </div>
-        )}
-      </form>
-    </div>
-  );
+  if (view === "mfa") {
+    return <MfaPage email={mfaEmail} onBack={() => setView("signin")} />;
+  }
+
+  // view === "signup"
+  return <SignUpPage onSignIn={() => setView("signin")} />;
 }
