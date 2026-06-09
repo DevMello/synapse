@@ -15,10 +15,13 @@ All queries are scoped by `principal.org_id` (service-role client bypasses RLS).
 """
 from __future__ import annotations
 
+from typing import Any, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from ..audit import get_audit
+from ..command_auth import verify_and_sign_command_auth
 from ..command_bus import get_command_bus
 from ..db import service_db
 from ..deps import Principal, get_principal, require_write
@@ -38,6 +41,11 @@ class EnvVarSet(BaseModel):
         min_length=1,
         description="base64 libsodium sealed box, encrypted to the daemon's pubkey",
     )
+    command_auth_token: Optional[dict[str, Any]] = None  # {envelope, user_sig} from browser
+
+
+class EnvVarDelete(BaseModel):
+    command_auth_token: Optional[dict[str, Any]] = None  # {envelope, user_sig} from browser
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -139,11 +147,23 @@ async def set_env(
         raise HTTPException(status.HTTP_409_CONFLICT, "agent has no owning daemon")
 
     # Relay opaque ciphertext to the daemon — not persisted anywhere.
+    set_payload: dict[str, Any] = {"name": body.name, "ciphertext": body.ciphertext}
+    command_auth: Optional[dict[str, Any]] = None
+    if body.command_auth_token is not None:
+        token = body.command_auth_token
+        command_auth = await verify_and_sign_command_auth(
+            token.get("envelope") or {},
+            token.get("user_sig", ""),
+            set_payload,
+            principal,
+            db,
+        )
     await get_command_bus().send(
         daemon_id,
         "env.set",
-        {"name": body.name, "ciphertext": body.ciphertext},
+        set_payload,
         idempotency_key=f"env.set:{agent_id}:{body.name}",
+        command_auth=command_auth,
     )
 
     ref = (
@@ -180,9 +200,12 @@ async def set_env(
     }
 
 
-@router.delete("/{agent_id}/env/{name}")
+@router.post("/{agent_id}/env/{name}/delete")
 async def delete_env(
-    agent_id: str, name: str, principal: Principal = Depends(require_write)
+    agent_id: str,
+    name: str,
+    body: EnvVarDelete,
+    principal: Principal = Depends(require_write),
 ) -> dict:
     """Command the daemon to unset the var and drop the ref row."""
     db = await service_db()
@@ -201,11 +224,23 @@ async def delete_env(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "env var not found")
 
     if daemon_id:
+        delete_payload: dict[str, Any] = {"name": name}
+        command_auth: Optional[dict[str, Any]] = None
+        if body.command_auth_token is not None:
+            token = body.command_auth_token
+            command_auth = await verify_and_sign_command_auth(
+                token.get("envelope") or {},
+                token.get("user_sig", ""),
+                delete_payload,
+                principal,
+                db,
+            )
         await get_command_bus().send(
             daemon_id,
             "env.delete",
-            {"name": name},
+            delete_payload,
             idempotency_key=f"env.delete:{agent_id}:{name}",
+            command_auth=command_auth,
         )
 
     await db.table("env_var_refs").delete().eq("org_id", principal.org_id).eq(

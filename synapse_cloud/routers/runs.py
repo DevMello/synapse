@@ -30,6 +30,7 @@ from postgrest.exceptions import APIError
 from pydantic import BaseModel, Field
 
 from ..audit import get_audit
+from ..command_auth import verify_and_sign_command_auth
 from ..command_bus import get_command_bus
 from ..db import service_db
 from ..deps import Principal, get_principal, require_write
@@ -48,6 +49,11 @@ class RunCreate(BaseModel):
     trigger: str = Field(default="manual")
     idempotency_key: Optional[str] = Field(default=None, min_length=1)
     input: Optional[dict[str, Any]] = None
+    command_auth_token: Optional[dict[str, Any]] = None  # {envelope, user_sig} from browser
+
+
+class RunCancel(BaseModel):
+    command_auth_token: Optional[dict[str, Any]] = None  # {envelope, user_sig} from browser
 
 
 async def _get_agent(db, org_id: str, agent_id: str) -> dict:
@@ -131,16 +137,35 @@ async def create_run(
     run_id = run["id"]
 
     if daemon_id is not None:
+        run_payload = {
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "trigger": body.trigger,
+            "input": body.input or {},
+        }
+        # Payload the browser signs excludes run_id (not known until after DB insert).
+        # The daemon receives the full run_payload; the hash covers only the browser-known fields.
+        signing_payload = {
+            "agent_id": agent_id,
+            "trigger": body.trigger,
+            "input": body.input or {},
+        }
+        command_auth: Optional[dict[str, Any]] = None
+        if body.command_auth_token is not None:
+            token = body.command_auth_token
+            command_auth = await verify_and_sign_command_auth(
+                token.get("envelope") or {},
+                token.get("user_sig", ""),
+                signing_payload,
+                principal,
+                db,
+            )
         await get_command_bus().send(
             daemon_id,
             "agent.run",
-            {
-                "run_id": run_id,
-                "agent_id": agent_id,
-                "trigger": body.trigger,
-                "input": body.input or {},
-            },
+            run_payload,
             idempotency_key=body.idempotency_key or run_id,
+            command_auth=command_auth,
         )
 
     await get_audit().write(
@@ -199,7 +224,9 @@ async def list_agent_runs(
 
 @router.post("/runs/{run_id}/cancel")
 async def cancel_run(
-    run_id: str, principal: Principal = Depends(require_write)
+    run_id: str,
+    body: RunCancel = RunCancel(),
+    principal: Principal = Depends(require_write),
 ) -> dict:
     """Cancel a run: dispatch ``agent.cancel`` + mark the run 'cancelled'."""
     db = await service_db()
@@ -211,11 +238,23 @@ async def cancel_run(
 
     daemon_id = run.get("daemon_id")
     if daemon_id is not None:
+        cancel_payload = {"run_id": run_id, "agent_id": run.get("agent_id")}
+        command_auth: Optional[dict[str, Any]] = None
+        if body.command_auth_token is not None:
+            token = body.command_auth_token
+            command_auth = await verify_and_sign_command_auth(
+                token.get("envelope") or {},
+                token.get("user_sig", ""),
+                cancel_payload,
+                principal,
+                db,
+            )
         await get_command_bus().send(
             daemon_id,
             "agent.cancel",
-            {"run_id": run_id, "agent_id": run.get("agent_id")},
+            cancel_payload,
             idempotency_key=f"cancel:{run_id}",
+            command_auth=command_auth,
         )
 
     updated = (
