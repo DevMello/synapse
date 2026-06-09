@@ -38,6 +38,15 @@ CHANNEL_CONTROL = "control"
 CHANNEL_TELEMETRY = "telemetry"
 
 
+@dataclass(frozen=True)
+class CommandAuth:
+    """The dual-signature block attached to human-triggered command frames."""
+
+    envelope: dict
+    user_sig: str
+    cloud_sig: str
+
+
 @dataclass
 class CloudCommand:
     """A parsed cloud->daemon command frame."""
@@ -46,6 +55,7 @@ class CloudCommand:
     command_type: str
     payload: dict[str, Any]
     idempotency_key: Optional[str] = None
+    command_auth: Optional[CommandAuth] = None  # present on human-triggered commands
 
 
 def parse_frame(raw: str) -> Optional[dict[str, Any]]:
@@ -62,11 +72,20 @@ def parse_command(frame: dict[str, Any]) -> Optional[CloudCommand]:
     if frame.get("type") != TYPE_COMMAND:
         return None
     payload = frame.get("payload")
+    auth_raw = frame.get("command_auth")
+    command_auth = None
+    if isinstance(auth_raw, dict):
+        command_auth = CommandAuth(
+            envelope=auth_raw.get("envelope") or {},
+            user_sig=auth_raw.get("user_sig") or "",
+            cloud_sig=auth_raw.get("cloud_sig") or "",
+        )
     return CloudCommand(
         seq=frame.get("seq") if isinstance(frame.get("seq"), int) else None,
         command_type=str(frame.get("command_type") or ""),
         payload=payload if isinstance(payload, dict) else {},
         idempotency_key=frame.get("idempotency_key"),
+        command_auth=command_auth,
     )
 
 
