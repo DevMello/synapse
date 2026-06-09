@@ -32,7 +32,7 @@ const VIEW_TITLES: Record<string, string> = {
   "": "Dashboard", agents: "Agents", daemons: "Daemons", runs: "Runs",
   approvals: "Approvals", alerts: "Alerts", marketplace: "Marketplace",
   webhooks: "Webhooks", notifications: "Notifications", settings: "Settings",
-  connect: "Connect a device",
+  connect: "Connect a device", account: "Account security",
 };
 
 function useCounts() {
@@ -88,6 +88,12 @@ function Sidebar() {
           onClick={() => navigate("/settings")}
         >
           <Icon name="settings" size={16} /><span>Settings</span>
+        </button>
+        <button
+          className={"db-nav-item" + (isActive(location.pathname, "/account/security") ? " active" : "")}
+          onClick={() => navigate("/account/security")}
+        >
+          <Icon name="shield" size={16} /><span>Account security</span>
         </button>
         <button className="db-ws-switch">
           <span className="db-ws-avatar">N</span>
