@@ -16,6 +16,7 @@ Design notes:
 """
 from __future__ import annotations
 
+import datetime
 import json
 import time
 from pathlib import Path
@@ -181,6 +182,21 @@ CREATE TABLE IF NOT EXISTS orchestration_lineage (
     completed_at  REAL
 );
 CREATE INDEX IF NOT EXISTS idx_lineage_root ON orchestration_lineage (root_run_id);
+
+-- Nonce replay-prevention store for command_auth envelopes (§command-signing).
+CREATE TABLE IF NOT EXISTS seen_nonces (
+    nonce      TEXT PRIMARY KEY,
+    expires_at TEXT NOT NULL,
+    stored_at  REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_nonces_expiry ON seen_nonces (expires_at);
+
+-- Cached per-user Ed25519 command-signing public keys (15-minute TTL).
+CREATE TABLE IF NOT EXISTS command_keys (
+    user_id    TEXT PRIMARY KEY,
+    public_key TEXT NOT NULL,
+    fetched_at REAL NOT NULL
+);
 """
 
 
@@ -321,6 +337,44 @@ class LocalStore:
             "INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
             (k, _dumps(v)),
         )
+
+    # ── command-auth: nonce replay prevention ─────────────────────────────
+    async def check_and_store_nonce(self, nonce: str, expires_at: str) -> bool:
+        """Returns True if nonce is new (safe to process); False if already seen (replay)."""
+        cur = await self.db.execute(
+            "INSERT OR IGNORE INTO seen_nonces (nonce, expires_at, stored_at) VALUES (?, ?, ?)",
+            (nonce, expires_at, time.time()),
+        )
+        inserted = cur.rowcount > 0
+        if inserted:
+            await self.db.commit()
+        return inserted
+
+    async def prune_expired_nonces(self) -> None:
+        """Remove nonces whose envelope has already expired."""
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        await self.db.execute("DELETE FROM seen_nonces WHERE expires_at < ?", (now_iso,))
+        await self.db.commit()
+
+    # ── command-auth: user command-key cache ──────────────────────────────
+    async def get_command_key(self, user_id: str, ttl_seconds: float = 900.0) -> Optional[str]:
+        """Return cached public key for *user_id* if still within TTL, else None."""
+        cutoff = time.time() - ttl_seconds
+        cur = await self.db.execute(
+            "SELECT public_key FROM command_keys WHERE user_id = ? AND fetched_at > ?",
+            (user_id, cutoff),
+        )
+        row = await cur.fetchone()
+        await cur.close()
+        return row[0] if row else None
+
+    async def set_command_key(self, user_id: str, public_key: str) -> None:
+        """Cache a user's command-signing public key."""
+        await self.db.execute(
+            "INSERT OR REPLACE INTO command_keys (user_id, public_key, fetched_at) VALUES (?, ?, ?)",
+            (user_id, public_key, time.time()),
+        )
+        await self.db.commit()
 
 
 # ── singleton seam ────────────────────────────────────────────────────────

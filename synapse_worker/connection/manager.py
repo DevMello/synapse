@@ -26,7 +26,7 @@ from websockets.exceptions import ConnectionClosed
 
 from .. import wire
 from ..logging import get_logger
-from ..router import CommandContext, dispatch, should_process
+from ..router import CommandContext, dispatch, set_command_auth_verifier, should_process
 from ..store import LocalStore
 from ..uplink import (
     CHANNEL_CONTROL,
@@ -236,8 +236,32 @@ class ConnectionManager:
             # bumps the version, or the operator edits tags/name in config).
             await self._send_register()
             await self._send_reconcile()
+            # Initialise command-auth verifier from the configured grant_public_key.
+            # This is the same Ed25519 key already trusted for orchestration grants (§2.4).
+            # If the cloud delivers a different key in a daemon.register response that will
+            # override this via _handle_register_response().
+            self._maybe_init_command_auth_verifier()
         # Replay this channel's durably-queued, still-unacked frames IN seq ORDER.
         await self._replay_pending(channel, ws)
+
+    def _maybe_init_command_auth_verifier(self, grant_key: Optional[str] = None) -> None:
+        """Install a CommandAuthVerifier if a grant key is available.
+
+        Uses *grant_key* when supplied (from a live register response) or falls back to
+        ``settings.grant_public_key`` (statically configured). A missing or empty key means
+        verification is not yet available and the existing soft-rollout behaviour applies.
+        """
+        key = grant_key or self._settings.grant_public_key
+        if not key:
+            return
+        try:
+            from ..command_auth import CommandAuthVerifier
+
+            verifier = CommandAuthVerifier(key, self._store, self._settings)
+            set_command_auth_verifier(verifier)
+            log.debug("command_auth verifier initialised")
+        except Exception:  # noqa: BLE001 - bad key at startup must not crash the connect
+            log.warning("failed to initialise command_auth verifier", exc_info=True)
 
     async def _replay_pending(self, channel: str, ws: ClientConnection) -> None:
         """Re-send every unacked outbound row for this channel, in seq order.
@@ -351,6 +375,16 @@ class ConnectionManager:
         t = frame.get("type")
         if t == wire.TYPE_COMMAND:
             await self._handle_command(ws, frame)
+        elif t == "daemon.registered":
+            # Cloud responds to daemon.register with optional grant_public_key_b64.
+            # Use it to (re)initialise the command-auth verifier with the live cloud key.
+            payload = frame.get("payload") or {}
+            grant_key = (
+                payload.get("grant_public_key_b64")
+                or payload.get("command_verify_key_b64")
+            )
+            if grant_key:
+                self._maybe_init_command_auth_verifier(grant_key)
         elif t == wire.TYPE_ACK:
             # The cloud is acking one of OUR upstream rows: clear it durably.
             seq = frame.get("ack")
@@ -382,7 +416,14 @@ class ConnectionManager:
         try:
             fresh = await should_process(cmd.idempotency_key, cmd.command_type)
             if fresh:
-                await dispatch(cmd.command_type, ctx, cmd.payload)
+                await dispatch(
+                    cmd.command_type,
+                    ctx,
+                    cmd.payload,
+                    command_auth=cmd.command_auth,
+                    daemon_id=daemon_id or "",
+                    require_auth=getattr(self._settings, "require_command_auth", False),
+                )
         except Exception:  # noqa: BLE001 - never let one command kill the loop
             log.exception("command %s handling failed", cmd.command_type)
         finally:
@@ -402,6 +443,7 @@ class ConnectionManager:
     # ── heartbeat / ping ──────────────────────────────────────────────────
     async def _heartbeat_loop(self, ws: ClientConnection) -> None:
         interval = max(1, int(self._settings.heartbeat_interval_seconds))
+        _prune_ticks = 0
         try:
             # Send an initial heartbeat right away so cloud presence flips online fast.
             await ws.send(wire.dumps(wire.build_heartbeat()))
@@ -411,6 +453,14 @@ class ConnectionManager:
                 # pong so we also detect an app-silent-but-tcp-alive cloud.
                 await ws.send(wire.dumps(wire.build_heartbeat()))
                 await ws.send(wire.dumps(wire.build_ping()))
+                # Prune expired command-auth nonces roughly once a minute.
+                _prune_ticks += 1
+                if _prune_ticks >= max(1, 60 // interval):
+                    _prune_ticks = 0
+                    try:
+                        await self._store.prune_expired_nonces()
+                    except Exception:  # noqa: BLE001
+                        pass
         except (asyncio.CancelledError, ConnectionClosed):
             raise
         except Exception:  # noqa: BLE001 - don't let heartbeat errors leak

@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     # signed grants offline. Empty => orchestration grants cannot be verified.
     grant_public_key: str = ""
 
+    # Command signing: when True, commands that fail dual-signature verification are
+    # rejected (not just logged). False = soft-rollout mode.
+    require_command_auth: bool = False
+
     # Guardrail defaults (per-agent config overrides these)
     redaction_enabled: bool = True
     injection_guard_enabled: bool = True
@@ -119,6 +123,11 @@ class Settings(BaseSettings):
     @property
     def token_url(self) -> str:
         return f"{self.cloud_base_url.rstrip('/')}/auth/token"
+
+    @property
+    def cloud_api_url(self) -> str:
+        """REST API base URL (same host as cloud_base_url, no trailing slash)."""
+        return self.cloud_base_url.rstrip("/")
 
 
 @lru_cache
