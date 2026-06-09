@@ -20,6 +20,19 @@ async function authHeaders(): Promise<Record<string, string>> {
   return headers;
 }
 
+export async function apiGet<T = unknown>(path: string): Promise<T> {
+  if (!API_BASE) throw new Error("Cloud API not configured (VITE_API_BASE)");
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "GET",
+    headers: await authHeaders(),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
+  }
+  return (await res.json()) as T;
+}
+
 export async function apiPost<T = unknown>(path: string, body?: unknown): Promise<T> {
   if (!API_BASE) throw new Error("Cloud API not configured (VITE_API_BASE)");
   const res = await fetch(`${API_BASE}${path}`, {

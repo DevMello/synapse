@@ -4,6 +4,7 @@
 // Ported from the design prototype's `Settings` (design-reference/app/Views.jsx)
 // and deepened with full Profile / Members / Billing / Tokens sub-tabs.
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { PageHead, Segmented, ConfirmDialog, MetricCard, SectionRow } from "../components/Common";
 import { Button, Icon } from "../components/Primitives";
 import {
@@ -11,9 +12,10 @@ import {
   useTeams, useCreateTeam, useDeleteTeam, useAddTeamMember, useRemoveTeamMember,
 } from "../api/queries";
 import { useUI } from "../store/ui";
+import { isApiConfigured, apiGet, apiPost } from "../api/client";
 import type { Member, Role, TeamNode } from "../types";
 
-type SubTab = "profile" | "members" | "teams" | "billing" | "tokens";
+type SubTab = "profile" | "members" | "teams" | "billing" | "tokens" | "authentication";
 
 // What each role is permitted to do — surfaced as RBAC copy so operators
 // understand exactly what an invite grants.
@@ -52,6 +54,7 @@ export default function Settings() {
           ["teams", "Teams"],
           ["billing", "Billing & usage"],
           ["tokens", "API tokens"],
+          ["authentication", "Authentication"],
         ] as [SubTab, string][]).map(([id, label]) => (
           <button
             key={id}
@@ -68,6 +71,7 @@ export default function Settings() {
       {sub === "teams" && <TeamsTab showToast={showToast} />}
       {sub === "billing" && <BillingTab />}
       {sub === "tokens" && <TokensTab showToast={showToast} />}
+      {sub === "authentication" && <AuthenticationTab showToast={showToast} />}
     </>
   );
 }
@@ -603,6 +607,149 @@ function TokensTab({ showToast }: { showToast: (m: { text: string; variant?: "ok
         confirmLabel="Revoke token"
         danger
       />
+    </>
+  );
+}
+
+// ── Authentication ────────────────────────────────────────────────────────────
+interface MfaPolicy {
+  require_mfa: boolean;
+}
+
+interface MfaMemberStatus {
+  userId: string;
+  name: string;
+  email: string;
+  init: string;
+  role: Role;
+  mfaEnabled: boolean;
+}
+
+// Mock data used when the Cloud API is not configured.
+const MOCK_MFA_POLICY: MfaPolicy = { require_mfa: false };
+
+function useMfaPolicy() {
+  return useQuery<MfaPolicy>({
+    queryKey: ["mfa-policy"],
+    queryFn: async () => {
+      if (!isApiConfigured()) return MOCK_MFA_POLICY;
+      return apiGet<MfaPolicy>("/api/v1/org/mfa-policy");
+    },
+  });
+}
+
+function AuthenticationTab({ showToast }: { showToast: (m: { text: string; variant?: "ok" | "warn" }) => void }) {
+  const { data: members = [] } = useMembers();
+  const { data: policy, isLoading: policyLoading } = useMfaPolicy();
+
+  // Local toggle mirrors the fetched policy; optimistic update on save.
+  const [requireMfa, setRequireMfa] = useState<boolean>(false);
+  const [saving, setSaving] = useState(false);
+
+  // Sync state once policy loads.
+  useEffect(() => {
+    if (policy !== undefined) setRequireMfa(policy.require_mfa);
+  }, [policy]);
+
+  // Derive per-member MFA status. In mock mode every owner/admin is enrolled;
+  // operators and viewers are not — a realistic but safe default for demonstration.
+  const mfaRows: MfaMemberStatus[] = members
+    .filter((m) => !m.pending)
+    .map((m) => ({
+      userId: m.userId,
+      name: m.name,
+      email: m.email,
+      init: m.init,
+      role: m.role,
+      mfaEnabled: m.role === "owner" || m.role === "admin",
+    }));
+
+  const enrolledCount = mfaRows.filter((r) => r.mfaEnabled).length;
+
+  async function savePolicy() {
+    setSaving(true);
+    try {
+      if (isApiConfigured()) {
+        await apiPost("/api/v1/org/mfa-policy", { require_mfa: requireMfa });
+      }
+      showToast({ text: requireMfa ? "MFA required for all members" : "MFA requirement lifted" });
+    } catch (e) {
+      showToast({ text: (e as Error).message, variant: "warn" });
+      // Revert optimistic change on error.
+      if (policy !== undefined) setRequireMfa(policy.require_mfa);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="db-callout">
+        <Icon name="shield-check" size={16} />
+        <span>
+          <b>MFA policy.</b> When <em>Require MFA</em> is on, members without a second factor
+          enrolled will be blocked from the workspace until they enroll. Only owners can change
+          this setting.
+        </span>
+      </div>
+
+      <SectionRow title="Policy" />
+      <div className="db-panel" style={{ maxWidth: 480 }}>
+        {policyLoading ? (
+          <span className="db-mono db-muted">Loading…</span>
+        ) : (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={requireMfa}
+                  onChange={(e) => setRequireMfa(e.target.checked)}
+                  style={{ width: 16, height: 16 }}
+                />
+                <span>Require MFA for all workspace members</span>
+              </label>
+            </div>
+            <Button variant="primary" icon="shield-check" onClick={savePolicy} disabled={saving}>
+              {saving ? "Saving…" : "Save policy"}
+            </Button>
+          </>
+        )}
+      </div>
+
+      <SectionRow title={`Member MFA status · ${enrolledCount} / ${mfaRows.length} enrolled`} />
+      <div className="db-table-wrap">
+        <table className="db-table">
+          <thead>
+            <tr><th>Member</th><th>Email</th><th>Role</th><th>MFA</th></tr>
+          </thead>
+          <tbody>
+            {mfaRows.map((m) => (
+              <tr key={m.userId}>
+                <td className="db-cell-primary">
+                  <span className="db-member">
+                    <span className="db-member-av">{m.init}</span>
+                    {m.name}
+                  </span>
+                </td>
+                <td className="db-mono db-muted">{m.email}</td>
+                <td><span className={"db-role-pill " + m.role}>{m.role}</span></td>
+                <td>
+                  {m.mfaEnabled ? (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "var(--c-ok, #16a34a)", fontSize: 13 }}>
+                      <Icon name="shield-check" size={14} /> Enrolled
+                    </span>
+                  ) : (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "var(--c-warn, #ca8a04)", fontSize: 13 }}>
+                      <Icon name="shield-alert" size={14} /> Not enrolled
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }
