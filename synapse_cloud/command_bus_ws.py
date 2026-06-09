@@ -31,6 +31,7 @@ class WebSocketCommandBus(DaemonCommandBus):
         payload: dict[str, Any],
         *,
         idempotency_key: Optional[str] = None,
+        command_auth: Optional[dict[str, Any]] = None,
     ) -> CommandResult:
         conn = self._registry.get(daemon_id)
         if conn is None:
@@ -40,11 +41,15 @@ class WebSocketCommandBus(DaemonCommandBus):
                 command_type,
                 dict(payload),
                 idempotency_key=idempotency_key,
+                command_auth=command_auth,
             )
             return CommandResult(delivered=False, queued=True)
         try:
             await conn.send_command(
-                command_type, dict(payload), idempotency_key=idempotency_key
+                command_type,
+                dict(payload),
+                idempotency_key=idempotency_key,
+                command_auth=command_auth,
             )
         except Exception as exc:  # noqa: BLE001 - socket died mid-send
             # Treat as offline: buffer and report it wasn't delivered.
@@ -53,6 +58,7 @@ class WebSocketCommandBus(DaemonCommandBus):
                 command_type,
                 dict(payload),
                 idempotency_key=idempotency_key,
+                command_auth=command_auth,
             )
             return CommandResult(delivered=False, queued=True, error=str(exc))
         return CommandResult(delivered=True)

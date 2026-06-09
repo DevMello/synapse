@@ -11,11 +11,12 @@ All queries are scoped by `principal.org_id` (service-role client bypasses RLS).
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from ..command_auth import verify_and_sign_command_auth
 from ..command_bus import get_command_bus
 from ..db import service_db
 from ..deps import Principal, get_principal, require_write
@@ -32,6 +33,7 @@ _VALID_DECISIONS = {"approved", "denied"}
 class HITLResolve(BaseModel):
     decision: str = Field(description="'approved' or 'denied'")
     reason: Optional[str] = None
+    command_auth_token: Optional[dict[str, Any]] = None  # {envelope, user_sig} from browser
 
 
 # ── inbound handler: daemon → cloud ───────────────────────────────────────────
@@ -160,17 +162,29 @@ async def resolve_hitl(
         raise HTTPException(status.HTTP_409_CONFLICT, "request already resolved")
     row = updated[0]
 
+    resolve_payload: dict[str, Any] = {
+        "hitl_id": row["id"],
+        "run_id": row.get("run_id"),
+        "agent_id": row.get("agent_id"),
+        "action": row.get("action"),
+        "decision": body.decision,
+        "reason": body.reason,
+    }
+    command_auth: Optional[dict[str, Any]] = None
+    if body.command_auth_token is not None:
+        token = body.command_auth_token
+        command_auth = await verify_and_sign_command_auth(
+            token.get("envelope") or {},
+            token.get("user_sig", ""),
+            resolve_payload,
+            principal,
+            db,
+        )
     await get_command_bus().send(
         row["daemon_id"],
         "hitl.resolve",
-        {
-            "hitl_id": row["id"],
-            "run_id": row.get("run_id"),
-            "agent_id": row.get("agent_id"),
-            "action": row.get("action"),
-            "decision": body.decision,
-            "reason": body.reason,
-        },
+        resolve_payload,
         idempotency_key=f"hitl.resolve:{row['id']}",
+        command_auth=command_auth,
     )
     return row

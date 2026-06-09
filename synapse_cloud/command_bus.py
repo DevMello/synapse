@@ -31,6 +31,7 @@ class DaemonCommandBus(abc.ABC):
         payload: dict[str, Any],
         *,
         idempotency_key: Optional[str] = None,
+        command_auth: Optional[dict[str, Any]] = None,
     ) -> CommandResult:
         """Deliver a command to a daemon's control channel (at-least-once)."""
 
@@ -49,6 +50,7 @@ class SentCommand:
     command_type: str
     payload: dict[str, Any]
     idempotency_key: Optional[str] = None
+    command_auth: Optional[dict] = None
 
 
 class InMemoryCommandBus(DaemonCommandBus):
@@ -59,8 +61,8 @@ class InMemoryCommandBus(DaemonCommandBus):
         self._connected: set[str] = set()
         self.closed: list[tuple[str, str]] = []
 
-    async def send(self, daemon_id, command_type, payload, *, idempotency_key=None):
-        self.sent.append(SentCommand(daemon_id, command_type, dict(payload), idempotency_key))
+    async def send(self, daemon_id, command_type, payload, *, idempotency_key=None, command_auth=None):
+        self.sent.append(SentCommand(daemon_id, command_type, dict(payload), idempotency_key, command_auth))
         return CommandResult(delivered=True)
 
     def is_connected(self, daemon_id: str) -> bool:

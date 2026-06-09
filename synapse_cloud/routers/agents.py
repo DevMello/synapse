@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from ..audit import get_audit
+from ..command_auth import verify_and_sign_command_auth
 from ..command_bus import get_command_bus
 from ..db import service_db
 from ..deps import Principal, get_principal, require_write
@@ -57,6 +58,7 @@ class VersionCreate(BaseModel):
     message: Optional[str] = None
     tags: list[str] = Field(default_factory=list)
     deploy: bool = False
+    command_auth_token: Optional[dict[str, Any]] = None  # {envelope, user_sig} from browser
 
 
 class VersionPatch(BaseModel):
@@ -90,6 +92,7 @@ async def _emit_command(
     *,
     org_id: str,
     actor: Optional[str],
+    command_auth: Optional[dict[str, Any]] = None,
 ) -> bool:
     """Send agent.deploy / agent.update_prompt to the owning daemon.
 
@@ -112,6 +115,7 @@ async def _emit_command(
             command_type,
             payload,
             idempotency_key=f"{command_type}:{agent_id}:{version}",
+            command_auth=command_auth,
         )
         sent = True
 
@@ -316,12 +320,29 @@ async def create_agent_version(
     agent["current_version"] = version_row["version"]
 
     command_type = "agent.deploy" if body.deploy else "agent.update_prompt"
+    command_auth: Optional[dict[str, Any]] = None
+    if body.command_auth_token is not None:
+        token = body.command_auth_token
+        deploy_payload = {
+            "agent_id": agent_id,
+            "version": version_row["version"],
+            "prompt": version_row.get("prompt"),
+            "config": version_row.get("config") or {},
+        }
+        command_auth = await verify_and_sign_command_auth(
+            token.get("envelope") or {},
+            token.get("user_sig", ""),
+            deploy_payload,
+            principal,
+            db,
+        )
     await _emit_command(
         agent,
         command_type,
         version_row,
         org_id=principal.org_id,
         actor=principal.user_id,
+        command_auth=command_auth,
     )
     return version_row
 

@@ -67,16 +67,19 @@ class DaemonConnection:
         payload: dict[str, Any],
         *,
         idempotency_key: Optional[str] = None,
+        command_auth: Optional[dict[str, Any]] = None,
     ) -> int:
         """Assign a seq, buffer the frame for redelivery, and push it. Returns seq."""
         seq = self.next_seq()
-        frame = {
+        frame: dict[str, Any] = {
             "type": "command",
             "seq": seq,
             "command_type": command_type,
             "payload": payload,
             "idempotency_key": idempotency_key,
         }
+        if command_auth is not None:
+            frame["command_auth"] = command_auth
         self.pending[seq] = _PendingCommand(seq=seq, frame=frame)
         await self._send(frame)
         return seq
@@ -172,17 +175,20 @@ class ConnectionRegistry:
         payload: dict[str, Any],
         *,
         idempotency_key: Optional[str] = None,
+        command_auth: Optional[dict[str, Any]] = None,
     ) -> int:
         """Queue a command for a daemon that isn't currently connected."""
         seq = self._offline_seq.get(daemon_id, 0) + 1
         self._offline_seq[daemon_id] = seq
-        frame = {
+        frame: dict[str, Any] = {
             "type": "command",
             "seq": seq,
             "command_type": command_type,
             "payload": payload,
             "idempotency_key": idempotency_key,
         }
+        if command_auth is not None:
+            frame["command_auth"] = command_auth
         self._offline_pending.setdefault(daemon_id, {})[seq] = _PendingCommand(seq=seq, frame=frame)
         return seq
 
