@@ -5,6 +5,9 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "./supabase";
+import { SignUpPage } from "../components/auth/SignUpPage";
+
+type AuthView = "signin" | "signup";
 
 export function AuthGate({ children }: { children: ReactNode }) {
   if (!isSupabaseConfigured || !supabase) return <>{children}</>;
@@ -13,6 +16,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
 function RequireSession({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
+  const [view, setView] = useState<AuthView>("signin");
 
   useEffect(() => {
     supabase!.auth.getSession().then(({ data }) => setSession(data.session));
@@ -23,11 +27,14 @@ function RequireSession({ children }: { children: ReactNode }) {
   if (session === undefined) {
     return <div className="db-mono db-muted" style={{ padding: 40 }}>Loading…</div>;
   }
-  if (session === null) return <SignIn />;
+  if (session === null) {
+    if (view === "signup") return <SignUpPage onSignIn={() => setView("signin")} />;
+    return <SignIn onSignUp={() => setView("signup")} />;
+  }
   return <>{children}</>;
 }
 
-function SignIn() {
+function SignIn({ onSignUp }: { onSignUp?: () => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -54,6 +61,27 @@ function SignIn() {
         <button className="db-btn db-btn-primary" type="submit" disabled={busy}>
           {busy ? "Signing in…" : "Sign in"}
         </button>
+        {onSignUp && (
+          <div style={{ textAlign: "center", fontSize: 13, color: "var(--mute)" }}>
+            Don't have an account?{" "}
+            <button
+              type="button"
+              onClick={onSignUp}
+              style={{
+                background: "none",
+                border: "none",
+                color: "var(--accent)",
+                cursor: "pointer",
+                fontWeight: 600,
+                fontSize: 13,
+                padding: 0,
+                fontFamily: "inherit",
+              }}
+            >
+              Create account
+            </button>
+          </div>
+        )}
       </form>
     </div>
   );
