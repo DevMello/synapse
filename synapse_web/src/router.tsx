@@ -18,6 +18,7 @@ const Webhooks = lazy(() => import("./screens/Webhooks"));
 const Notifications = lazy(() => import("./screens/Notifications"));
 const Settings = lazy(() => import("./screens/Settings"));
 const AgentDetail = lazy(() => import("./screens/agent/AgentDetail"));
+const AccountSecurity = lazy(() => import("./screens/AccountSecurity"));
 
 export const router = createBrowserRouter(
   [
@@ -37,6 +38,7 @@ export const router = createBrowserRouter(
         { path: "webhooks", element: <Webhooks /> },
         { path: "notifications", element: <Notifications /> },
         { path: "settings", element: <Settings /> },
+        { path: "account/security", element: <AccountSecurity /> },
       ],
     },
   ],

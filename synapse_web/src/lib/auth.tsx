@@ -8,8 +8,19 @@ import { supabase, isSupabaseConfigured } from "./supabase";
 import { SignInPage } from "../components/auth/SignInPage";
 import { SignUpPage } from "../components/auth/SignUpPage";
 import { MfaPage } from "../components/auth/MfaPage";
+import { MfaEnrollTotp } from "../components/auth/MfaEnrollTotp";
+import { MfaEnrollPasskey } from "../components/auth/MfaEnrollPasskey";
+import { RecoveryCodesDisplay } from "../components/auth/RecoveryCodesDisplay";
+import { RecoveryCodePage } from "../components/auth/RecoveryCodePage";
 
-type AuthView = "signin" | "signup" | "mfa";
+type AuthView =
+  | "signin"
+  | "signup"
+  | "mfa"
+  | "enroll-totp"
+  | "enroll-passkey"
+  | "show-recovery-codes"
+  | "recovery-code";
 
 export function AuthGate({ children }: { children: ReactNode }) {
   if (!isSupabaseConfigured || !supabase) return <>{children}</>;
@@ -52,7 +63,39 @@ function RequireSession({ children }: { children: ReactNode }) {
   }
 
   if (view === "mfa") {
-    return <MfaPage email={mfaEmail} onBack={() => setView("signin")} />;
+    return (
+      <MfaPage
+        email={mfaEmail}
+        onBack={() => setView("signin")}
+        onRecoveryCode={() => setView("recovery-code")}
+      />
+    );
+  }
+
+  if (view === "enroll-totp") {
+    return (
+      <MfaEnrollTotp
+        onEnrolled={() => setView("show-recovery-codes")}
+        onCancel={() => setView("signin")}
+      />
+    );
+  }
+
+  if (view === "enroll-passkey") {
+    return (
+      <MfaEnrollPasskey
+        onEnrolled={() => setView("show-recovery-codes")}
+        onCancel={() => setView("signin")}
+      />
+    );
+  }
+
+  if (view === "show-recovery-codes") {
+    return <RecoveryCodesDisplay onConfirmed={() => setView("signin")} />;
+  }
+
+  if (view === "recovery-code") {
+    return <RecoveryCodePage onBack={() => setView("signin")} />;
   }
 
   // view === "signup"
