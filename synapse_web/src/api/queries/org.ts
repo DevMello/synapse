@@ -6,6 +6,9 @@ import type { Org, OrgSummary } from "../../types";
 import { toOrg } from "../adapters/org";
 import { useUI } from "../../store/ui";
 
+// Re-exported alias so Shell.tsx can import OrgRecord without changing its import site.
+export type OrgRecord = OrgSummary;
+
 export function useOrg(): UseQueryResult<Org> {
   const activeOrgId = useUI((s) => s.activeOrgId);
   return useQuery({

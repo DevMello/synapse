@@ -1,5 +1,5 @@
 import { lazy } from "react";
-import { createBrowserRouter } from "react-router-dom";
+import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppLayout } from "./components/Shell";
 import Tweaks from "./screens/Tweaks";
 
@@ -18,7 +18,8 @@ const Webhooks = lazy(() => import("./screens/Webhooks"));
 const Notifications = lazy(() => import("./screens/Notifications"));
 const Settings = lazy(() => import("./screens/Settings"));
 const AgentDetail = lazy(() => import("./screens/agent/AgentDetail"));
-const AccountSecurity = lazy(() => import("./screens/AccountSecurity"));
+const Organizations = lazy(() => import("./screens/Organizations"));
+const OrgSettings = lazy(() => import("./screens/OrgSettings"));
 
 export const router = createBrowserRouter(
   [
@@ -38,7 +39,9 @@ export const router = createBrowserRouter(
         { path: "webhooks", element: <Webhooks /> },
         { path: "notifications", element: <Notifications /> },
         { path: "settings", element: <Settings /> },
-        { path: "account/security", element: <AccountSecurity /> },
+        { path: "organizations", element: <Organizations /> },
+        { path: "org/:orgId/settings", element: <OrgSettings /> },
+        { path: "account/security", element: <Navigate to="/settings" replace /> },
       ],
     },
   ],
