@@ -16,6 +16,7 @@ export function toOrg(org: OrgRow, user: UserRow | null): Org {
   const settings = (org.settings ?? {}) as { plan?: string };
   const operator = user?.display_name ?? user?.email ?? "—";
   return {
+    id: org.id,
     name: org.name,
     plan: settings.plan ?? "Team",
     operator,

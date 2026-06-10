@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tan
 import { supabase, isSupabaseConfigured } from "../../lib/supabase";
 import type { TeamNode } from "../../types";
 import { buildTeamTree } from "../adapters/teams";
+import { useUI } from "../../store/ui";
 
 const MOCK_TREE: TeamNode[] = [
   {
@@ -21,6 +22,10 @@ const MOCK_TREE: TeamNode[] = [
 ];
 
 async function currentOrgId(): Promise<string> {
+  const storeOrgId = useUI.getState().activeOrgId;
+  if (storeOrgId && storeOrgId !== "personal") {
+    return storeOrgId;
+  }
   const { data, error } = await supabase!.from("organizations").select("id").limit(1).maybeSingle();
   if (error) throw error;
   if (!data) throw new Error("No organization for the current session");

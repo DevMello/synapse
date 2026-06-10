@@ -7,10 +7,19 @@ export type CapabilityKind = "MCP server" | "plugin";
 export type CapabilityState = "ready" | "installing" | "available" | "failed";
 
 export interface Org {
+  id: string;
   name: string;
   plan: string;
   operator: string;
   initials: string;
+}
+
+export interface OrgSummary {
+  id: string;
+  name: string;
+  plan: string;
+  initials: string;
+  isPersonal?: boolean;
 }
 
 export interface CapabilityDef {

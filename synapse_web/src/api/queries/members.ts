@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tan
 import { supabase, isSupabaseConfigured } from "../../lib/supabase";
 import type { Member, Role } from "../../types";
 import { toMember, toInvite } from "../adapters/members";
+import { useUI } from "../../store/ui";
 
 const MOCK_MEMBERS: Member[] = [
   { userId: "u-ak", name: "Avery Koss", email: "avery@northwind.io", role: "owner", init: "AK", active: "just now" },
@@ -17,6 +18,10 @@ const MOCK_MEMBERS: Member[] = [
 const ROLE_RANK: Record<Role, number> = { owner: 0, admin: 1, operator: 2, viewer: 3 };
 
 async function currentOrgId(): Promise<string> {
+  const storeOrgId = useUI.getState().activeOrgId;
+  if (storeOrgId && storeOrgId !== "personal") {
+    return storeOrgId;
+  }
   const { data, error } = await supabase!
     .from("organizations")
     .select("id")
