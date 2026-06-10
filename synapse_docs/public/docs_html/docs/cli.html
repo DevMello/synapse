@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CLI Reference — Synapse Docs</title>
+  <link rel="stylesheet" href="../assets/styles.css" />
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../index.html" class="nav-logo">
+      <span class="logo-mark"></span>
+      Synapse
+    </a>
+    <div class="nav-links">
+      <a href="getting-started.html">Docs</a>
+      <a href="cli.html">CLI</a>
+      <a href="use-cases.html">Use Cases</a>
+      <a href="faq.html">FAQ</a>
+      <a href="getting-started.html" class="btn-primary">Get Started</a>
+    </div>
+  </div>
+</nav>
+
+<div class="docs-layout">
+  <aside class="docs-sidebar">
+    <h3>Documentation</h3>
+    <nav class="sidebar-nav">
+      <a href="getting-started.html">Getting Started</a>
+      <a href="concepts.html">Concepts</a>
+      <a href="daemon.html">Daemon</a>
+      <a href="agents.html">Agents</a>
+      <a href="hitl.html">Human-in-the-Loop</a>
+      <a href="security.html">Security</a>
+      <a href="web-ui.html">Web UI</a>
+      <a href="scheduling.html">Scheduling</a>
+      <a href="marketplace.html">Marketplace</a>
+      <a href="orchestration.html">Orchestration</a>
+      <a href="memory.html">Memory</a>
+      <a href="cli.html">CLI Reference</a>
+      <a href="use-cases.html">Use Cases</a>
+      <a href="faq.html">FAQ</a>
+    </nav>
+  </aside>
+
+  <main class="docs-content">
+    <div class="doc-hero">
+      <div class="kicker">Reference</div>
+      <h1>CLI Reference</h1>
+      <p>
+        Complete reference for all <code>synapse</code> CLI subcommands. The CLI controls your local daemon,
+        manages agents and environment variables, and authenticates with the Synapse cloud. New to Synapse?
+        Start with the <a href="getting-started.html">Getting Started guide</a>.
+      </p>
+    </div>
+
+    <!-- ── Authentication ─────────────────────────────────────────── -->
+    <section class="doc-section" id="authentication">
+      <h2>Authentication</h2>
+
+      <h3><code>synapse login</code></h3>
+      <div class="synopsis">synapse login [--cloud-url URL] [--timeout DURATION]</div>
+      <p>
+        Start the RFC 8628 Device Authorization Grant flow. The CLI prints an 8-character
+        <code>user_code</code> and a verification URL. Open the URL in your already-authenticated
+        browser and approve the device. The CLI polls the cloud until the request is approved, then
+        stores the access/refresh token pair securely in the OS keychain.
+      </p>
+      <table>
+        <thead>
+          <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>--cloud-url URL</code></td>
+            <td><code>https://synapse.cloud</code></td>
+            <td>Override the cloud endpoint (useful for self-hosted deployments).</td>
+          </tr>
+          <tr>
+            <td><code>--timeout DURATION</code></td>
+            <td><code>5m</code></td>
+            <td>Maximum time to wait for browser approval before giving up.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">synapse login</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$ </span>synapse login</div>
+          <div class="term-out info">To authorize this device, visit:</div>
+          <div class="term-out">&nbsp;&nbsp;https://synapse.cloud/device</div>
+          <div class="term-out">&nbsp;</div>
+          <div class="term-out">  Enter code: <strong>XKCD-7A2F</strong></div>
+          <div class="term-out">&nbsp;</div>
+          <div class="term-out">Waiting for approval...</div>
+          <div class="term-out">Waiting for approval.....</div>
+          <div class="term-out ok">Authenticated as alice@example.com</div>
+          <div class="term-out">Token stored in OS keychain.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Daemon ─────────────────────────────────────────────────── -->
+    <section class="doc-section" id="daemon">
+      <h2>Daemon</h2>
+
+      <h3><code>synapse init</code></h3>
+      <div class="synopsis">synapse init [--name NAME] [--cloud-url URL]</div>
+      <p>
+        Interactive wizard that creates <code>~/.synapse/daemon.toml</code>. Generates an X25519
+        keypair (private key stored in the OS keychain, public key registered with the cloud), sets
+        the daemon name, sets the cloud URL, and configures the default log level.
+      </p>
+      <table>
+        <thead>
+          <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>--name NAME</code></td>
+            <td>hostname</td>
+            <td>Human-readable name for this daemon instance.</td>
+          </tr>
+          <tr>
+            <td><code>--cloud-url URL</code></td>
+            <td><code>https://synapse.cloud</code></td>
+            <td>Cloud endpoint to register with.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">synapse init</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$ </span>synapse init</div>
+          <div class="term-out info">Synapse daemon setup wizard</div>
+          <div class="term-out">&nbsp;</div>
+          <div class="term-out">Daemon name [my-macbook]: <strong>work-laptop</strong></div>
+          <div class="term-out">Cloud URL [https://synapse.cloud]: </div>
+          <div class="term-out">Log level (debug/info/warn/error) [info]: </div>
+          <div class="term-out">&nbsp;</div>
+          <div class="term-out ok">Generated X25519 keypair — private key stored in OS keychain</div>
+          <div class="term-out ok">Public key registered with cloud</div>
+          <div class="term-out ok">Config written to ~/.synapse/daemon.toml</div>
+          <div class="term-out">&nbsp;</div>
+          <div class="term-out info">Run `synapse daemon run` to start the daemon.</div>
+        </div>
+      </div>
+
+      <h3><code>synapse daemon run</code></h3>
+      <div class="synopsis">synapse daemon run [--config PATH] [--log-level LEVEL]</div>
+      <p>
+        Start the daemon in the foreground. The daemon establishes an outbound WebSocket connection
+        to the cloud uplink and begins processing agent runs dispatched by the cloud. Log output goes
+        to stdout. Press <kbd>Ctrl-C</kbd> for a graceful shutdown — in-flight runs are allowed to
+        finish before the process exits.
+      </p>
+      <table>
+        <thead>
+          <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>--config PATH</code></td>
+            <td><code>~/.synapse/daemon.toml</code></td>
+            <td>Path to the daemon configuration file.</td>
+          </tr>
+          <tr>
+            <td><code>--log-level LEVEL</code></td>
+            <td><code>info</code></td>
+            <td>Log verbosity: <code>debug</code>, <code>info</code>, <code>warn</code>, or <code>error</code>.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">synapse daemon run</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$ </span>synapse daemon run</div>
+          <div class="term-out info">Starting Synapse daemon v0.9.4</div>
+          <div class="term-out ok">Connected to cloud uplink wss://synapse.cloud/ws/daemon</div>
+          <div class="term-out info">Listening for agent runs... (Ctrl-C to stop)</div>
+          <div class="term-out">2026-06-10 09:14:32 [INFO ] run:a1b2c3 agent=pr-reviewer started</div>
+          <div class="term-out">2026-06-10 09:14:45 [INFO ] run:a1b2c3 agent=pr-reviewer finished in 13.2s</div>
+        </div>
+      </div>
+
+      <h3><code>synapse daemon install</code></h3>
+      <div class="synopsis">synapse daemon install [--user]</div>
+      <p>
+        Install the daemon as a native system service so it starts automatically on boot. Uses
+        <strong>launchd</strong> on macOS, <strong>systemd</strong> on Linux, and
+        <strong>Windows Service</strong> on Windows. By default installs as a system-level service
+        (requires administrator/root privileges). Pass <code>--user</code> to install as a
+        user-level service instead.
+      </p>
+      <table>
+        <thead>
+          <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>--user</code></td>
+            <td>false</td>
+            <td>Install as a user service (no root required) rather than a system service.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">synapse daemon install</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$ </span>synapse daemon install --user</div>
+          <div class="term-out ok">Installed user service: com.synapse.daemon</div>
+          <div class="term-out ok">Service started</div>
+          <div class="term-out info">Daemon will start automatically on login.</div>
+        </div>
+      </div>
+
+      <h3><code>synapse daemon status</code></h3>
+      <div class="synopsis">synapse daemon status</div>
+      <p>
+        Show the current daemon status: whether it is running or stopped, uptime, cloud connection
+        state, number of active agent runs, and current memory usage.
+      </p>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">synapse daemon status</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$ </span>synapse daemon status</div>
+          <div class="term-out ok">Daemon is running</div>
+          <div class="term-out">  Uptime        2h 34m 11s</div>
+          <div class="term-out">  Cloud         connected (wss://synapse.cloud)</div>
+          <div class="term-out">  Active runs   1</div>
+          <div class="term-out">  Memory        48.2 MB RSS</div>
+        </div>
+      </div>
+
+      <h3><code>synapse daemon stop</code></h3>
+      <div class="synopsis">synapse daemon stop [--force]</div>
+      <p>
+        Gracefully stop the running daemon. The daemon waits for any in-flight agent runs to
+        complete before exiting. Use <code>--force</code> to kill the process immediately without
+        waiting for runs to finish.
+      </p>
+      <table>
+        <thead>
+          <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>--force</code></td>
+            <td>false</td>
+            <td>Kill the daemon process immediately, abandoning in-flight runs.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">synapse daemon stop</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$ </span>synapse daemon stop</div>
+          <div class="term-out info">Waiting for 1 in-flight run(s) to finish...</div>
+          <div class="term-out ok">Daemon stopped</div>
+        </div>
+      </div>
+
+      <h3><code>synapse daemon logs</code></h3>
+      <div class="synopsis">synapse daemon logs [--follow] [--since DURATION] [--level LEVEL]</div>
+      <p>
+        Print daemon log output. By default shows the tail of the current log. Use
+        <code>--follow</code> to stream live output, <code>--since</code> to limit to recent time
+        windows, and <code>--level</code> to filter by minimum severity.
+      </p>
+      <table>
+        <thead>
+          <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>--follow</code> / <code>-f</code></td>
+            <td>false</td>
+            <td>Stream new log lines as they are written.</td>
+          </tr>
+          <tr>
+            <td><code>--since DURATION</code></td>
+            <td>—</td>
+            <td>Show logs from the last duration, e.g. <code>1h</code>, <code>30m</code>.</td>
+          </tr>
+          <tr>
+            <td><code>--level LEVEL</code></td>
+            <td><code>info</code></td>
+            <td>Minimum log level to display: <code>debug</code>, <code>info</code>, <code>warn</code>, <code>error</code>.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">synapse daemon logs</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$ </span>synapse daemon logs --since 30m --level warn</div>
+          <div class="term-out">2026-06-10 09:02:11 [WARN ] run:d4e5f6 tool=bash exit_code=1 retrying (1/3)</div>
+          <div class="term-out">2026-06-10 09:12:03 [WARN ] uplink reconnect attempt 1 (backoff 2s)</div>
+          <div class="term-out ok">Reconnected to cloud uplink</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Agents ────────────────────────────────────────────────── -->
+    <section class="doc-section" id="agents">
+      <h2>Agents</h2>
+
+      <h3><code>synapse agent list</code></h3>
+      <div class="synopsis">synapse agent list [--json]</div>
+      <p>
+        List all agents in the organization with their status (enabled/disabled), last run time, and
+        total run count. Pass <code>--json</code> to receive machine-readable JSON output.
+      </p>
+      <table>
+        <thead>
+          <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>--json</code></td>
+            <td>false</td>
+            <td>Output results as a JSON array instead of a human-readable table.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">synapse agent list</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$ </span>synapse agent list</div>
+          <div class="term-out">NAME              STATUS    LAST RUN            RUNS</div>
+          <div class="term-out">pr-reviewer       enabled   2026-06-10 09:14    142</div>
+          <div class="term-out">release-drafter   enabled   2026-06-09 18:03     38</div>
+          <div class="term-out">dep-scanner       disabled  2026-05-21 11:22     19</div>
+        </div>
+      </div>
+
+      <h3><code>synapse agent create</code></h3>
+      <div class="synopsis">synapse agent create --name NAME --type TYPE [--prompt-file PATH]</div>
+      <p>
+        Create a new agent in the organization. <code>--type</code> must be one of
+        <code>api-model</code> (calls a language model API) or <code>cli-tool</code> (runs a local
+        shell command). Use <code>--prompt-file</code> to load the system prompt from a Markdown
+        file on disk.
+      </p>
+      <table>
+        <thead>
+          <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>--name NAME</code></td>
+            <td>—</td>
+            <td>Unique slug for the agent (required).</td>
+          </tr>
+          <tr>
+            <td><code>--type TYPE</code></td>
+            <td>—</td>
+            <td><code>api-model</code> or <code>cli-tool</code> (required).</td>
+          </tr>
+          <tr>
+            <td><code>--prompt-file PATH</code></td>
+            <td>—</td>
+            <td>Path to a Markdown file containing the system prompt.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">synapse agent create</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$ </span>synapse agent create --name dep-auditor --type api-model --prompt-file ./prompts/dep-auditor.md</div>
+          <div class="term-out ok">Agent "dep-auditor" created (type: api-model)</div>
+          <div class="term-out info">System prompt loaded from ./prompts/dep-auditor.md (1.4 KB)</div>
+        </div>
+      </div>
+
+      <h3><code>synapse agent run</code></h3>
+      <div class="synopsis">synapse agent run NAME [--env KEY=VALUE ...] [--wait] [--timeout DURATION]</div>
+      <p>
+        Trigger a manual run of the named agent. By default the command returns the run ID
+        immediately and the run executes asynchronously on the daemon. Pass <code>--wait</code> to
+        block until the run completes and show the exit status. Use <code>--env</code> to override
+        environment variables for this single run only (without modifying stored secrets).
+      </p>
+      <table>
+        <thead>
+          <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>--env KEY=VALUE</code></td>
+            <td>—</td>
+            <td>Override an env var for this run only. May be repeated.</td>
+          </tr>
+          <tr>
+            <td><code>--wait</code></td>
+            <td>false</td>
+            <td>Block until the run finishes and print the result.</td>
+          </tr>
+          <tr>
+            <td><code>--timeout DURATION</code></td>
+            <td><code>10m</code></td>
+            <td>Maximum time to wait when <code>--wait</code> is set.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">synapse agent run</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$ </span>synapse agent run pr-reviewer --wait --env PR_NUMBER=482</div>
+          <div class="term-out info">Run enqueued: a1b2c3d4</div>
+          <div class="term-out">Waiting for run a1b2c3d4 to complete...</div>
+          <div class="term-out ok">Run a1b2c3d4 finished in 13.2s (exit: success)</div>
+        </div>
+      </div>
+
+      <h3><code>synapse agent logs</code></h3>
+      <div class="synopsis">synapse agent logs NAME [--run RUN_ID] [--follow] [--since DURATION]</div>
+      <p>
+        Print or stream logs for an agent. Without <code>--run</code>, shows logs from the most
+        recent run. Combine with <code>--follow</code> to tail an active run in real time.
+      </p>
+      <table>
+        <thead>
+          <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>--run RUN_ID</code></td>
+            <td>latest</td>
+            <td>Show logs for a specific run ID rather than the most recent.</td>
+          </tr>
+          <tr>
+            <td><code>--follow</code> / <code>-f</code></td>
+            <td>false</td>
+            <td>Stream new log lines as they arrive.</td>
+          </tr>
+          <tr>
+            <td><code>--since DURATION</code></td>
+            <td>—</td>
+            <td>Limit output to the last duration, e.g. <code>5m</code>.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">synapse agent logs</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$ </span>synapse agent logs pr-reviewer --follow</div>
+          <div class="term-out">2026-06-10 09:14:32 [INFO ] run started</div>
+          <div class="term-out">2026-06-10 09:14:33 [INFO ] fetching PR #482 diff (4 files)</div>
+          <div class="term-out">2026-06-10 09:14:41 [INFO ] model responded (718 tokens)</div>
+          <div class="term-out">2026-06-10 09:14:44 [INFO ] posted 3 review comments</div>
+          <div class="term-out ok">run finished in 13.2s</div>
+        </div>
+      </div>
+
+      <h3><code>synapse agent schedule add</code></h3>
+      <div class="synopsis">synapse agent schedule add NAME --cron "EXPR" [--tz TIMEZONE] [--overlap POLICY]</div>
+      <p>
+        Add a cron schedule to an agent. The cron expression follows standard five-field syntax
+        (<code>minute hour day-of-month month day-of-week</code>). The <code>--overlap</code> policy
+        controls what happens when a new run is triggered while a previous run is still in progress.
+      </p>
+      <table>
+        <thead>
+          <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>--cron "EXPR"</code></td>
+            <td>—</td>
+            <td>Standard cron expression, e.g. <code>"0 9 * * 1-5"</code> (required).</td>
+          </tr>
+          <tr>
+            <td><code>--tz TIMEZONE</code></td>
+            <td><code>UTC</code></td>
+            <td>IANA timezone for cron evaluation, e.g. <code>America/New_York</code>.</td>
+          </tr>
+          <tr>
+            <td><code>--overlap POLICY</code></td>
+            <td><code>coalesce</code></td>
+            <td>
+              Overlap policy: <code>coalesce</code> (skip new run if one is running),
+              <code>run_once</code> (queue at most one pending), or
+              <code>allow</code> (always start a new run).
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">synapse agent schedule add</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$ </span>synapse agent schedule add dep-auditor --cron "0 8 * * 1" --tz America/New_York --overlap coalesce</div>
+          <div class="term-out ok">Schedule added to "dep-auditor"</div>
+          <div class="term-out">  Cron     0 8 * * 1 (America/New_York)</div>
+          <div class="term-out">  Overlap  coalesce</div>
+          <div class="term-out">  Next run 2026-06-15 08:00:00 EDT</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Environment Variables ─────────────────────────────────── -->
+    <section class="doc-section" id="env">
+      <h2>Environment Variables</h2>
+
+      <div class="callout warning">
+        <span class="callout-icon">&#9888;</span>
+        <p>
+          <strong>Values are always read from stdin, never passed as CLI arguments.</strong>
+          This prevents secrets from appearing in shell history, process lists, or log files.
+        </p>
+      </div>
+
+      <h3><code>synapse env set</code></h3>
+      <div class="synopsis">synapse env set AGENT_NAME KEY</div>
+      <p>
+        Set an environment variable for an agent. The value is read from stdin — never passed as a
+        CLI argument — and is encrypted client-side with the agent's X25519 public key before being
+        uploaded. The cloud stores only the ciphertext; the plaintext value is never transmitted
+        unencrypted and is never accessible server-side.
+      </p>
+      <table>
+        <thead>
+          <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><em>No flags</em></td>
+            <td>—</td>
+            <td>Value is always piped via stdin.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">synapse env set</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-comment"># Pipe the secret value via stdin</span></div>
+          <div><span class="term-prompt">$ </span>echo "sk-proj-abc123..." | synapse env set pr-reviewer OPENAI_API_KEY</div>
+          <div class="term-out ok">OPENAI_API_KEY encrypted and stored for agent "pr-reviewer"</div>
+          <div class="term-out">&nbsp;</div>
+          <div><span class="term-comment"># Or read from a file</span></div>
+          <div><span class="term-prompt">$ </span>cat ~/.secrets/gh-token | synapse env set release-drafter GITHUB_TOKEN</div>
+          <div class="term-out ok">GITHUB_TOKEN encrypted and stored for agent "release-drafter"</div>
+        </div>
+      </div>
+
+      <h3><code>synapse env list</code></h3>
+      <div class="synopsis">synapse env list AGENT_NAME</div>
+      <p>
+        List the names of environment variables configured for an agent. Values are never shown —
+        they are write-only once stored. This command only reveals which keys exist.
+      </p>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">synapse env list</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$ </span>synapse env list pr-reviewer</div>
+          <div class="term-out">OPENAI_API_KEY    set  (updated 2026-06-10)</div>
+          <div class="term-out">GITHUB_TOKEN      set  (updated 2026-05-28)</div>
+          <div class="term-out">&nbsp;</div>
+          <div><span class="term-comment"># Values are never displayed — only key names</span></div>
+        </div>
+      </div>
+
+      <h3><code>synapse env delete</code></h3>
+      <div class="synopsis">synapse env delete AGENT_NAME KEY</div>
+      <p>
+        Permanently delete a stored environment variable for an agent. The ciphertext is removed
+        from the cloud immediately.
+      </p>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">synapse env delete</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$ </span>synapse env delete pr-reviewer OPENAI_API_KEY</div>
+          <div class="term-out warn">Delete OPENAI_API_KEY from "pr-reviewer"? [y/N]: <strong>y</strong></div>
+          <div class="term-out ok">OPENAI_API_KEY deleted</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Plugins ───────────────────────────────────────────────── -->
+    <section class="doc-section" id="plugins">
+      <h2>Plugins</h2>
+
+      <h3><code>synapse plugin install</code></h3>
+      <div class="synopsis">synapse plugin install PLUGIN_NAME [@VERSION]</div>
+      <p>
+        Install a plugin or skill from the Synapse marketplace to the local daemon. Plugin names
+        without a namespace are tool integrations (e.g. <code>github</code>). Prefix with
+        <code>skill:</code> to install agent skills. Append <code>@VERSION</code> to pin a specific
+        release.
+      </p>
+      <table>
+        <thead>
+          <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><em>No flags</em></td>
+            <td>—</td>
+            <td>Version is optional; omit for the latest release.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">synapse plugin install</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$ </span>synapse plugin install github</div>
+          <div class="term-out ok">Installed plugin: github v2.1.0</div>
+          <div class="term-out">&nbsp;</div>
+          <div><span class="term-prompt">$ </span>synapse plugin install skill:security-scan@1.2.0</div>
+          <div class="term-out ok">Installed skill: security-scan v1.2.0</div>
+        </div>
+      </div>
+
+      <h3><code>synapse plugin list</code></h3>
+      <div class="synopsis">synapse plugin list</div>
+      <p>
+        List all installed plugins and skills with their current version and activation status.
+      </p>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">synapse plugin list</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$ </span>synapse plugin list</div>
+          <div class="term-out">NAME                  TYPE    VERSION  STATUS</div>
+          <div class="term-out">github                plugin  2.1.0    active</div>
+          <div class="term-out">slack                 plugin  1.4.2    active</div>
+          <div class="term-out">skill:security-scan   skill   1.2.0    active</div>
+          <div class="term-out">skill:code-review     skill   0.9.1    disabled</div>
+        </div>
+      </div>
+
+      <h3><code>synapse plugin remove</code></h3>
+      <div class="synopsis">synapse plugin remove PLUGIN_NAME</div>
+      <p>
+        Remove an installed plugin or skill from the local daemon. The daemon must be restarted for
+        the change to take full effect.
+      </p>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">synapse plugin remove</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$ </span>synapse plugin remove skill:code-review</div>
+          <div class="term-out ok">Removed skill: code-review</div>
+          <div class="term-out info">Restart the daemon for changes to take effect.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── TUI ───────────────────────────────────────────────────── -->
+    <section class="doc-section" id="tui">
+      <h2>TUI Dashboard</h2>
+
+      <h3><code>synapse tui</code></h3>
+      <div class="synopsis">synapse tui</div>
+      <p>
+        Launch the Textual-based terminal UI dashboard. The TUI shows live agent status, active
+        runs with streaming log output, recent run history, and the human-in-the-loop approvals
+        queue. All data is read from the local daemon over a Unix socket.
+      </p>
+      <p>Keyboard shortcuts:</p>
+      <table>
+        <thead>
+          <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><em>No flags</em></td><td>—</td><td>No configuration flags; uses the default daemon socket.</td></tr>
+        </tbody>
+      </table>
+      <table>
+        <thead>
+          <tr><th>Key</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>q</code></td><td>Quit the TUI</td></tr>
+          <tr><td><code>r</code></td><td>Force refresh all panels</td></tr>
+          <tr><td><code>a</code></td><td>Approve the selected item in the approvals pane</td></tr>
+          <tr><td><code>l</code></td><td>Jump to the logs pane</td></tr>
+        </tbody>
+      </table>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">synapse tui</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$ </span>synapse tui</div>
+          <div class="term-out info">Connecting to daemon... connected</div>
+          <div class="term-out">&nbsp;</div>
+          <div class="term-out">┌─ Synapse ────────────── v0.9.4 ── work-laptop ─────────────────┐</div>
+          <div class="term-out">│  Agents (3)   Runs (1 active)   Approvals (0)   Logs            │</div>
+          <div class="term-out">│                                                                  │</div>
+          <div class="term-out">│  pr-reviewer     ● running   09:14   a1b2c3d4                   │</div>
+          <div class="term-out">│  release-drafter ○ idle      18:03   —                          │</div>
+          <div class="term-out">│  dep-scanner     ✕ disabled  —       —                          │</div>
+          <div class="term-out">│                                                [q] quit  [r] refresh│</div>
+          <div class="term-out">└──────────────────────────────────────────────────────────────────┘</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Version ───────────────────────────────────────────────── -->
+    <section class="doc-section" id="version">
+      <h2>Version</h2>
+
+      <h3><code>synapse version</code></h3>
+      <div class="synopsis">synapse version [--json]</div>
+      <p>
+        Print version information for the local Synapse CLI/daemon, the Python runtime, the
+        operating system, and the cloud backend the daemon is currently connected to.
+      </p>
+      <table>
+        <thead>
+          <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>--json</code></td>
+            <td>false</td>
+            <td>Output version information as a JSON object.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">synapse version</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$ </span>synapse version</div>
+          <div class="term-out">Synapse daemon   0.9.4</div>
+          <div class="term-out">Python           3.12.4</div>
+          <div class="term-out">OS               macOS 15.4.1 (arm64)</div>
+          <div class="term-out">Cloud            0.9.4 (wss://synapse.cloud)</div>
+          <div class="term-out">&nbsp;</div>
+          <div><span class="term-prompt">$ </span>synapse version --json</div>
+          <div class="term-out">{</div>
+          <div class="term-out">  "daemon": "0.9.4",</div>
+          <div class="term-out">  "python": "3.12.4",</div>
+          <div class="term-out">  "os": "macOS 15.4.1 arm64",</div>
+          <div class="term-out">  "cloud": "0.9.4"</div>
+          <div class="term-out">}</div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<footer class="site-footer">
+  <p>Synapse &mdash; agent-manager platform &mdash; <a href="getting-started.html">Docs</a> &middot; <a href="https://github.com/synapse">GitHub</a></p>
+</footer>
+
+<script src="../assets/main.js"></script>
+</body>
+</html>

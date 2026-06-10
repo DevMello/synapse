@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web UI Guide — Synapse Docs</title>
+  <meta name="description" content="A screen-by-screen guide to the Synapse Web UI control surface — dashboard, agents, daemons, runs, approvals, marketplace, settings, and more.">
+  <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+
+  <!-- ── Site Nav ── -->
+  <nav class="site-nav">
+    <a class="nav-brand" href="../index.html">
+      <span class="logo-mark"></span>
+      <span>Synapse</span>
+    </a>
+    <div class="nav-links">
+      <a class="nav-link active" href="web-ui.html">Docs</a>
+      <a class="nav-link" href="../index.html#pricing">Pricing</a>
+      <a class="nav-link" href="../index.html#blog">Blog</a>
+    </div>
+    <a class="btn btn-primary btn-sm nav-cta" href="../index.html#get-started">Get Started</a>
+  </nav>
+
+  <!-- ── Docs Layout ── -->
+  <div class="docs-layout">
+
+    <!-- ── Sidebar ── -->
+    <aside class="docs-sidebar">
+      <nav>
+        <div class="docs-sidebar-group">
+          <span class="docs-sidebar-label">Getting Started</span>
+          <a class="docs-sidebar-link" href="quickstart.html">Quickstart</a>
+          <a class="docs-sidebar-link" href="installation.html">Installation</a>
+        </div>
+        <div class="docs-sidebar-group">
+          <span class="docs-sidebar-label">Fundamentals</span>
+          <a class="docs-sidebar-link" href="concepts.html">Core Concepts</a>
+          <a class="docs-sidebar-link" href="architecture.html">Architecture</a>
+          <a class="docs-sidebar-link" href="security.html">Security Model</a>
+        </div>
+        <div class="docs-sidebar-group">
+          <span class="docs-sidebar-label">Platform</span>
+          <a class="docs-sidebar-link" href="daemons.html">Daemons</a>
+          <a class="docs-sidebar-link" href="agents.html">Agents</a>
+          <a class="docs-sidebar-link" href="runs.html">Runs &amp; Traces</a>
+          <a class="docs-sidebar-link" href="hitl.html">HITL Gates</a>
+          <a class="docs-sidebar-link" href="guardrails.html">Guardrails</a>
+          <a class="docs-sidebar-link" href="capabilities.html">Capabilities &amp; MCP</a>
+        </div>
+        <div class="docs-sidebar-group">
+          <span class="docs-sidebar-label">Administration</span>
+          <a class="docs-sidebar-link" href="rbac.html">RBAC &amp; Roles</a>
+          <a class="docs-sidebar-link" href="secrets.html">Secrets &amp; Encryption</a>
+          <a class="docs-sidebar-link" href="orgs.html">Orgs &amp; Teams</a>
+        </div>
+        <div class="docs-sidebar-group">
+          <span class="docs-sidebar-label">Reference</span>
+          <a class="docs-sidebar-link active" href="web-ui.html">Web UI Guide</a>
+          <a class="docs-sidebar-link" href="api.html">API Reference</a>
+          <a class="docs-sidebar-link" href="cli.html">CLI Reference</a>
+          <a class="docs-sidebar-link" href="changelog.html">Changelog</a>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- ── Main Content ── -->
+    <main class="docs-content">
+
+      <!-- Breadcrumb -->
+      <nav class="docs-breadcrumb" aria-label="Breadcrumb">
+        <a href="../index.html">Home</a>
+        <span class="breadcrumb-sep">›</span>
+        <span>Web UI Guide</span>
+      </nav>
+
+      <!-- Hero -->
+      <header class="docs-hero">
+        <p class="t-kicker">WEB UI</p>
+        <h1 class="t-h1">Web UI Guide</h1>
+        <p class="t-lead">A screen-by-screen guide to the Synapse control surface — from the dashboard to settings.</p>
+      </header>
+
+      <!-- Body -->
+      <article class="doc-body">
+
+        <!-- ── Table of Contents ── -->
+        <nav class="toc" aria-label="On this page">
+          <p class="toc-label">On this page</p>
+          <ol class="toc-list">
+            <li><a href="#app-shell">App Shell &amp; Navigation</a></li>
+            <li><a href="#dashboard">Dashboard</a></li>
+            <li><a href="#agents">Agents</a></li>
+            <li><a href="#agent-detail-overview">Agent Detail — Overview Tab</a></li>
+            <li><a href="#agent-detail-tabs">Agent Detail — 12 Tabs</a></li>
+            <li><a href="#daemons">Daemons</a></li>
+            <li><a href="#connect">Connect (Device Authorization)</a></li>
+            <li><a href="#runs">Runs</a></li>
+            <li><a href="#approvals">Approvals</a></li>
+            <li><a href="#marketplace">Marketplace</a></li>
+            <li><a href="#webhooks">Webhooks</a></li>
+            <li><a href="#notifications">Notifications</a></li>
+            <li><a href="#settings">Settings</a></li>
+            <li><a href="#account-security">Account Security</a></li>
+            <li><a href="#organizations">Organizations</a></li>
+          </ol>
+        </nav>
+
+        <!-- ── App Shell & Navigation ── -->
+        <section id="app-shell">
+          <h2 class="t-h2">App Shell &amp; Navigation</h2>
+          <p class="t-body">Every screen in Synapse shares the same three-region layout: a sticky top header, a fixed left sidebar, and a grid-textured main content area. The shell is rendered by the root <code>AppLayout</code> component and wraps each screen in a React Suspense boundary so lazy-loaded tabs load without a full-page flash.</p>
+
+          <h3 class="t-h3">Sidebar (264 px)</h3>
+          <p class="t-body">The sidebar is always visible on desktop and collapses to a slide-out drawer on smaller viewports.</p>
+          <ul class="t-body">
+            <li><strong>Logo &amp; brand</strong> — clicking the Synapse logo navigates to the Dashboard.</li>
+            <li><strong>Connect a device</strong> — orange primary button that opens the <a href="#connect">Connect</a> flow for adding a new daemon.</li>
+            <li><strong>Monitoring</strong> — Dashboard, Runs, Approvals (with live badge count), Alerts.</li>
+            <li><strong>Agents &amp; Daemons</strong> — Agents, Daemons.</li>
+            <li><strong>Marketplace</strong> — browse and install agent templates, skills, and plugins.</li>
+            <li><strong>Settings</strong> — Webhooks, Notifications, Settings.</li>
+            <li><strong>Workspace footer</strong> — current org name with plan badge, avatar, and a "Switch org" shortcut.</li>
+          </ul>
+          <p class="t-body">Nav items highlight with an orange left-border accent when active. Badge counts on Approvals and Alerts update in real-time via Supabase Realtime.</p>
+
+          <h3 class="t-h3">Header (sticky 64 px)</h3>
+          <ul class="t-body">
+            <li><strong>Breadcrumb path</strong> — reflects the current route hierarchy (e.g. <em>Agents › my-agent › Editor</em>). Each segment is a clickable link except the last.</li>
+            <li><strong>Search bar</strong> — click or press <kbd>Cmd+K</kbd> / <kbd>Ctrl+K</kbd> to open the command palette. The palette provides fuzzy search across agents, daemons, and recent runs, plus quick-action shortcuts (new agent, open connect, jump to approvals).</li>
+            <li><strong>Notification bell</strong> — shows an unread-count badge; clicking opens the Notifications panel.</li>
+            <li><strong>Alerts icon</strong> — shows a count badge for unresolved anomaly alerts.</li>
+            <li><strong>User avatar</strong> — opens a dropdown with links to Account Security, Organizations, and Sign out.</li>
+          </ul>
+
+          <h3 class="t-h3">Keyboard shortcuts</h3>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr><th>Shortcut</th><th>Action</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><kbd>Cmd+K</kbd> / <kbd>Ctrl+K</kbd></td><td>Open the command palette for quick navigation, agent search, daemon search, run search</td></tr>
+                <tr><td><kbd>G</kbd> then <kbd>D</kbd></td><td>Go to Dashboard</td></tr>
+                <tr><td><kbd>G</kbd> then <kbd>A</kbd></td><td>Go to Agents</td></tr>
+                <tr><td><kbd>G</kbd> then <kbd>R</kbd></td><td>Go to Runs</td></tr>
+                <tr><td><kbd>Esc</kbd></td><td>Close any open modal, palette, or drawer</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 class="t-h3">Content area</h3>
+          <p class="t-body">The main content area sits to the right of the sidebar below the header. It uses a subtle grid-dot texture on the warm bone background (<code>#f4efe8</code>). Each screen manages its own max-width and padding; most cap at 1 280 px with 32 px horizontal padding.</p>
+        </section>
+
+        <!-- ── Dashboard ── -->
+        <section id="dashboard">
+          <h2 class="t-h2">Dashboard <code class="chip chip-muted">/</code></h2>
+          <p class="t-body">The dashboard gives you a fleet-wide overview at a glance. All data refreshes live via Supabase Realtime — run status changes and new approvals appear without a manual page refresh.</p>
+
+          <h3 class="t-h3">Metric cards (4)</h3>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr><th>Card</th><th>What it shows</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Daemons online</strong></td>
+                  <td>Online count vs. total registered (e.g. <em>3 / 5 online</em>). Clicking navigates to the Daemons screen.</td>
+                </tr>
+                <tr>
+                  <td><strong>Active runs</strong></td>
+                  <td>Number of runs currently in <span class="status-chip running">running</span> state across all agents.</td>
+                </tr>
+                <tr>
+                  <td><strong>Spend today</strong></td>
+                  <td>Cumulative USD spend since midnight UTC. Includes model tokens, plugin usage, and any metered capabilities.</td>
+                </tr>
+                <tr>
+                  <td><strong>Open approvals</strong></td>
+                  <td>Runs paused at a HITL gate awaiting a human decision. Clicking navigates to the Approvals screen.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 class="t-h3">Live active runs table</h3>
+          <p class="t-body">A real-time table of every run currently executing. Columns: <strong>Agent</strong> (name + link to agent detail), <strong>Trigger</strong> (icon for schedule / webhook / manual / agent), <strong>Daemon</strong> (host daemon name), <strong>Started</strong> (relative time), <strong>Cost</strong> (running USD total), <strong>Status</strong> chip. Click any row to navigate directly to the run's trace view.</p>
+
+          <h3 class="t-h3">Top agents by spend</h3>
+          <p class="t-body">Four agent cards ranked by descending daily spend. Each card shows: engine icon, agent name, engine identifier, daily spend (USD), and a miniature sparkline chart plotting recent run costs. Useful for spotting runaway spend before it becomes a problem.</p>
+
+          <h3 class="t-h3">Daemon mini-list</h3>
+          <p class="t-body">One row per connected daemon. Each row shows the daemon hostname, OS icon, a status dot (<span class="chip chip-ok">green</span> = online, <span class="chip chip-muted">gray</span> = offline), a 12-beat heartbeat strip visualising the last 12 heartbeat results, and a "last seen" timestamp.</p>
+
+          <h3 class="t-h3">Alert mini-feed</h3>
+          <p class="t-body">The latest three anomaly alerts with severity chip and timestamp. Click "View all" to go to the full Alerts screen.</p>
+
+          <div class="callout callout-info">
+            The dashboard subscribes to Supabase Realtime channels for <code>runs</code>, <code>approvals</code>, and <code>daemon_heartbeats</code>. All widgets update automatically — no polling interval to configure.
+          </div>
+        </section>
+
+        <!-- ── Agents ── -->
+        <section id="agents">
+          <h2 class="t-h2">Agents <code class="chip chip-muted">/agents</code></h2>
+          <p class="t-body">The Agents screen lists every agent registered to your org. You can browse, filter, search, and launch the New Agent wizard from here.</p>
+
+          <h3 class="t-h3">List vs. grid view</h3>
+          <p class="t-body">Toggle between a 3-column card grid and a compact list view using the view-toggle buttons in the top-right corner. The preference is stored locally and remembered between sessions.</p>
+
+          <h3 class="t-h3">Filters</h3>
+          <ul class="t-body">
+            <li><strong>Status</strong> — All / Running / Unavailable</li>
+            <li><strong>Search</strong> — fuzzy match on agent name, engine identifier, or host daemon name</li>
+          </ul>
+
+          <h3 class="t-h3">Agent card</h3>
+          <p class="t-body">Each card in grid view shows:</p>
+          <ul class="t-body">
+            <li>Engine icon (model avatar)</li>
+            <li>Agent name and type chip (<span class="chip chip-info">API model</span> or <span class="chip chip-muted">CLI tool</span>)</li>
+            <li>Engine name (e.g. <code>claude-sonnet-4-5</code>)</li>
+            <li>Host daemon name</li>
+            <li>Daily spend (USD)</li>
+            <li>Status chip — <span class="status-chip running">running</span>, <span class="status-chip passed">passed</span>, <span class="status-chip blocked">blocked</span>, or <span class="status-chip idle">idle</span></li>
+          </ul>
+          <p class="t-body">Clicking a card opens the <a href="#agent-detail-overview">Agent Detail</a> screen.</p>
+
+          <h3 class="t-h3">New Agent Wizard</h3>
+          <p class="t-body">Click <strong>New Agent</strong> to open the 5-step modal wizard:</p>
+          <ol class="t-body">
+            <li><strong>Name</strong> — agent name and optional description</li>
+            <li><strong>Host</strong> — select the daemon that will run this agent</li>
+            <li><strong>Engine</strong> — choose API model (select provider + model) or CLI tool</li>
+            <li><strong>Template</strong> — optionally pre-populate from a Marketplace template</li>
+            <li><strong>Deploy</strong> — review settings and deploy</li>
+          </ol>
+          <p class="t-body">See the Agent Management docs for the full wizard walkthrough.</p>
+        </section>
+
+        <!-- ── Agent Detail — Overview ── -->
+        <section id="agent-detail-overview">
+          <h2 class="t-h2">Agent Detail — Overview Tab <code class="chip chip-muted">/agents/:id</code></h2>
+          <p class="t-body">Clicking any agent opens its detail page. The page is composed of a persistent hero row at the top followed by a 12-tab panel.</p>
+
+          <h3 class="t-h3">Hero row</h3>
+          <ul class="t-body">
+            <li><strong>Engine avatar</strong> — large icon representing the model or tool type</li>
+            <li><strong>Agent name</strong> — rendered in the display heading style</li>
+            <li><strong>Status chip</strong> — <span class="status-chip running">running</span> animates with a pulsing orange dot; <span class="status-chip idle">idle</span> is gray</li>
+            <li><strong>Enabled / Disabled toggle</strong> — disabling prevents new runs from starting (ongoing runs are not interrupted)</li>
+            <li><strong>Run now button</strong> — triggers a manual run immediately</li>
+          </ul>
+
+          <h3 class="t-h3">Overview tab</h3>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr><th>Field</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Description</td><td>Free-text description from the agent config</td></tr>
+                <tr><td>Engine</td><td>Provider and model identifier</td></tr>
+                <tr><td>Host daemon</td><td>Hostname link — click to open the daemon card</td></tr>
+                <tr><td>Last run</td><td>Relative timestamp + exit status chip</td></tr>
+                <tr><td>Next scheduled run</td><td>Next execution time (only shown if a schedule is configured)</td></tr>
+                <tr><td>Error rate (30 d)</td><td>Percentage of runs that exited with a non-zero code over the past 30 days</td></tr>
+                <tr><td>Total runs</td><td>Lifetime run count</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- ── Agent Detail — 12 Tabs ── -->
+        <section id="agent-detail-tabs">
+          <h2 class="t-h2">Agent Detail — 12 Tabs</h2>
+          <p class="t-body">The tab bar below the hero row gives access to every facet of the agent. Tabs are lazy-loaded: heavy ones (Editor, Analytics) ship in their own JS chunk and render behind a Suspense boundary.</p>
+
+          <h3 class="t-h3">Editor</h3>
+          <p class="t-body">A full CodeMirror 6 Markdown editor for the agent's system prompt. Saving the editor creates an immutable version snapshot (visible in the Versions tab). A diff view toggles between the current working copy and any previously selected version, rendering additions in green and deletions in red.</p>
+
+          <h3 class="t-h3">Versions</h3>
+          <p class="t-body">A table of all snapshot versions of the system prompt. Columns: <strong>Label</strong>, <strong>Author</strong>, <strong>Timestamp</strong>, <strong>Message</strong>, <strong>Tags</strong> (e.g. <span class="chip chip-ok">production</span> <span class="chip chip-info">known-good</span>). Each row has a <strong>Set as active</strong> button that rolls back the live prompt to that snapshot without requiring a re-deploy.</p>
+
+          <h3 class="t-h3">Schedule</h3>
+          <p class="t-body">Configure when the agent runs automatically:</p>
+          <ul class="t-body">
+            <li><strong>Cron expression</strong> — standard 5-field cron (e.g. <code>0 9 * * 1-5</code> for 09:00 on weekdays)</li>
+            <li><strong>Interval</strong> — simple repeat interval (e.g. every 15 minutes)</li>
+            <li><strong>Next run time</strong> — previewed in your local timezone based on the current expression</li>
+            <li><strong>Overlap policy</strong> — Coalesce (skip extra triggers while one run is in flight), Skip, or Run once (queue at most one pending run)</li>
+          </ul>
+
+          <h3 class="t-h3">Tools &amp; MCP</h3>
+          <p class="t-body">Lists every capability (MCP server or plugin) installed on the host daemon. Each row shows the capability name, kind chip, and an on/off toggle controlling whether this agent can use it. Capabilities toggled off for this agent are never exposed at runtime even if installed on the daemon. A <strong>Request capability</strong> button initiates provisioning for capabilities not yet installed.</p>
+
+          <h3 class="t-h3">Plugins</h3>
+          <p class="t-body">Ecosystem plugins that extend the agent with domain-specific tools:</p>
+          <ul class="t-body">
+            <li><strong>browser-use</strong> — Playwright-backed web automation</li>
+            <li><strong>github</strong> — read repos, open PRs, comment on issues</li>
+            <li><strong>postgres</strong> — query and mutate databases</li>
+            <li><strong>slack</strong> — send and read messages</li>
+          </ul>
+          <p class="t-body">Each plugin shows its install status and exposes a per-agent settings form (e.g. target Postgres connection string, Slack workspace).</p>
+
+          <h3 class="t-h3">Environment</h3>
+          <p class="t-body">Manage the env vars injected into this agent's runtime. Columns: <strong>Key</strong>, <strong>Type</strong> (<span class="chip chip-warn">secret</span> / <span class="chip chip-muted">plain</span>), <strong>Origin</strong> (<code>cloud</code> = stored in Supabase Vault; <code>local</code> = stored only on the daemon), <strong>Last updated</strong>, <strong>Updated by</strong>.</p>
+          <div class="callout callout-warn">
+            Secret values are write-only. Once saved, the value is never displayed in the UI again — only the key name and metadata are shown. Overwrite or delete to change a secret.
+          </div>
+
+          <h3 class="t-h3">Memory</h3>
+          <p class="t-body">Per-agent key-value memory store. The table shows: <strong>Key</strong>, <strong>Namespace</strong>, <strong>Tags</strong>, <strong>Size</strong> (bytes), <strong>Last updated</strong>. Actions: search by key or tag, view value inline, edit, delete. The <strong>Pre-load snapshot</strong> action lets you seed a batch of memory entries from a JSON file before starting a run — useful for bootstrapping context.</p>
+
+          <h3 class="t-h3">Runs</h3>
+          <p class="t-body">Agent-scoped run history (same columns as the <a href="#runs">global Runs screen</a>). Clicking a row expands an in-line trace viewer below the table showing the full step-by-step execution log for that run — no navigation away from the page needed.</p>
+
+          <h3 class="t-h3">Orchestration</h3>
+          <p class="t-body">Manage which sub-agents this agent is authorized to spawn. Each grant row shows:</p>
+          <ul class="t-body">
+            <li><strong>Grantee agent</strong> — the sub-agent that may be spawned</li>
+            <li><strong>Verbs</strong> — permitted actions: <code>run</code> / <code>create</code> / <code>edit</code></li>
+            <li><strong>Max depth</strong> — how many levels of spawning are allowed</li>
+            <li><strong>Max fan-out</strong> — concurrent sub-agents cap</li>
+            <li><strong>Tree budget (USD)</strong> — cumulative spend limit for the entire sub-tree</li>
+            <li><strong>Expiry</strong> — optional grant expiration time</li>
+          </ul>
+          <p class="t-body"><strong>Mint new grant</strong> opens a form to add a new orchestration grant. <strong>Revoke</strong> on an existing row invalidates it immediately.</p>
+
+          <div class="callout callout-info">
+            Orchestration grants are signed with ed25519 and verified by the daemon before a sub-agent run is started. A grant cannot be self-issued — an operator or admin must create it.
+          </div>
+
+          <h3 class="t-h3">Logs</h3>
+          <p class="t-body">Structured log viewer for the most recent run (or any selected run). Logs stream in real time during an active run. Filter by TAG: <span class="chip chip-info">PLAN</span> <span class="chip chip-warn">BUILD</span> <span class="chip chip-ok">QA</span> <span class="chip chip-muted">MCP</span>. Each row shows: timestamp, TAG, severity indicator, and message rendered in JetBrains Mono.</p>
+
+          <h3 class="t-h3">Analytics</h3>
+          <p class="t-body">Four Recharts visualisations (lazy-loaded, async chunk):</p>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr><th>Chart</th><th>Type</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Daily spend</td><td>Bar chart</td><td>USD cost per day over the selected date range</td></tr>
+                <tr><td>Token usage</td><td>Stacked bar</td><td>Input tokens vs. output tokens per day</td></tr>
+                <tr><td>Run latency</td><td>Line chart</td><td>Median and p95 run duration (seconds) over time</td></tr>
+                <tr><td>Tool call distribution</td><td>Pie chart</td><td>Relative share of each tool/MCP call type</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="t-body">Use the date-range picker in the top-right of the Analytics tab to zoom into a specific window.</p>
+        </section>
+
+        <!-- ── Daemons ── -->
+        <section id="daemons">
+          <h2 class="t-h2">Daemons <code class="chip chip-muted">/daemons</code></h2>
+          <p class="t-body">The Daemons screen shows every device that has been authorised to run agents on behalf of your org. Each daemon is represented by an expandable card.</p>
+
+          <h3 class="t-h3">Daemon card</h3>
+          <p class="t-body">The collapsed card header shows:</p>
+          <ul class="t-body">
+            <li><strong>Hostname</strong> — the machine's hostname as reported by the daemon</li>
+            <li><strong>OS icon</strong> — monitor (Windows), apple / smartphone (macOS), server (Linux)</li>
+            <li><strong>Status dot</strong> — <span class="chip chip-ok">green</span> online, <span class="chip chip-muted">gray</span> offline</li>
+            <li><strong>Uptime %</strong> — percentage of heartbeats received in the past 24 h</li>
+            <li><strong>CPU %</strong> — last reported CPU utilisation</li>
+            <li><strong>Memory %</strong> — last reported RAM utilisation</li>
+            <li><strong>Active run count</strong> — runs currently executing on this daemon</li>
+            <li><strong>Last seen</strong> — relative time of the most recent heartbeat</li>
+            <li><strong>Daemon version</strong> — <code>synapse-worker</code> semver</li>
+            <li><strong>Tags</strong> — user-defined labels for grouping (e.g. <code>prod</code>, <code>eu-west</code>)</li>
+            <li><strong>12-beat heartbeat strip</strong> — coloured squares for the last 12 heartbeat intervals (green = received, red = missed)</li>
+          </ul>
+
+          <p class="t-body">Expanding the card reveals two additional sections:</p>
+
+          <h3 class="t-h3">Agents list</h3>
+          <p class="t-body">Each agent hosted on this daemon appears as a row with name and current status chip. Click an agent name to navigate to its detail page.</p>
+
+          <h3 class="t-h3">Capabilities grid</h3>
+          <p class="t-body">Every capability available to (or installed on) this daemon. Columns: <strong>Name</strong>, <strong>Kind</strong> (<span class="chip chip-info">MCP server</span> / <span class="chip chip-muted">plugin</span>), <strong>State</strong> chip, <strong>Built-in</strong> badge. An <strong>Install</strong> button appears for capabilities that are available but not yet provisioned.</p>
+
+          <h3 class="t-h3">Revoke device</h3>
+          <p class="t-body">The <strong>Revoke device</strong> button at the bottom of the expanded card permanently removes the daemon's authorisation. The daemon will no longer be able to connect to the cloud control plane. Any agents hosted on the daemon will be marked unavailable. This action requires admin role and shows a confirmation dialog before proceeding.</p>
+
+          <div class="callout callout-warn">
+            Revoking a daemon immediately terminates all ongoing runs on that machine. This cannot be undone — you will need to re-run <code>synapse login</code> on the device and go through the Connect flow again to re-authorise it.
+          </div>
+        </section>
+
+        <!-- ── Connect ── -->
+        <section id="connect">
+          <h2 class="t-h2">Connect (Device Authorization) <code class="chip chip-muted">/connect</code></h2>
+          <p class="t-body">The Connect flow authorises a new daemon (device) to join your org. It follows a 3-step device-authorization pattern: the daemon displays an 8-character code, and you confirm it in the Web UI.</p>
+
+          <h3 class="t-h3">Step 1 — Enter code</h3>
+          <p class="t-body">Enter the 8-character alphanumeric code that appeared in your terminal after running <code>synapse login</code>. The code input is split into two 4-character segments for readability (e.g. <code>ABCD</code> · <code>1234</code>). A <strong>Paste from clipboard</strong> button auto-fills both segments.</p>
+
+          <h3 class="t-h3">Step 2 — Verify device</h3>
+          <p class="t-body">Before approving, Synapse shows you the metadata of the device requesting access:</p>
+          <ul class="t-body">
+            <li><strong>Hostname</strong> — machine name reported by the daemon</li>
+            <li><strong>OS / Platform</strong> — operating system and architecture</li>
+            <li><strong>IP address + geo</strong> — approximate city/country derived from the request IP</li>
+            <li><strong>Code requested at</strong> — timestamp when the daemon generated the code</li>
+          </ul>
+          <div class="callout callout-warn">
+            Always verify the IP address and hostname match the machine you intended to connect. <strong>Deny if you did not start this from your own terminal.</strong>
+          </div>
+
+          <h3 class="t-h3">Step 3 — Approved</h3>
+          <p class="t-body">After clicking <strong>Approve</strong>, the daemon receives a signed token and completes its registration. The success screen shows the new daemon name and a link to view it in the <a href="#daemons">Daemons</a> screen.</p>
+        </section>
+
+        <!-- ── Runs ── -->
+        <section id="runs">
+          <h2 class="t-h2">Runs <code class="chip chip-muted">/runs</code></h2>
+          <p class="t-body">The Runs screen is the fleet-wide run history — every execution across every agent in your org, newest first.</p>
+
+          <h3 class="t-h3">Metric strip</h3>
+          <p class="t-body">Four summary cards at the top of the page:</p>
+          <ul class="t-body">
+            <li><strong>Active runs</strong> — runs currently in <span class="status-chip running">running</span> state</li>
+            <li><strong>Runs today</strong> — count of runs started since midnight UTC</li>
+            <li><strong>Spend today</strong> — cumulative USD cost for today's runs</li>
+            <li><strong>Tokens today</strong> — total tokens consumed today (input + output)</li>
+          </ul>
+
+          <h3 class="t-h3">Filters</h3>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr><th>Filter</th><th>Options</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Trigger</td><td>Any / Schedule / Webhook / Manual / Agent</td></tr>
+                <tr><td>Status</td><td>All / Running / Blocked / Passed / Recovering</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 class="t-h3">Run table</h3>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr><th>Column</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Run ID</td><td>Truncated UUID with copy button</td></tr>
+                <tr><td>Agent</td><td>Agent name (link to Agent Detail)</td></tr>
+                <tr><td>Trigger</td><td>Icon: clock (schedule), webhook, cursor (manual), robot (agent-spawned)</td></tr>
+                <tr><td>Started</td><td>Absolute timestamp (hover for relative time)</td></tr>
+                <tr><td>Duration</td><td>Wall-clock time; <em>ongoing</em> for active runs</td></tr>
+                <tr><td>Tokens</td><td>Total token count (input + output)</td></tr>
+                <tr><td>Cost</td><td>USD spend for this run</td></tr>
+                <tr><td>Exit code</td><td>Numeric exit code; <code>0</code> = success</td></tr>
+                <tr><td>Status</td><td>Status chip</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="t-body">Clicking a row navigates to that agent's Runs tab with the selected run highlighted and its inline trace expanded.</p>
+        </section>
+
+        <!-- ── Approvals ── -->
+        <section id="approvals">
+          <h2 class="t-h2">Approvals <code class="chip chip-muted">/approvals</code></h2>
+          <p class="t-body">The Approvals screen is the live Human-in-the-Loop (HITL) queue. When an agent hits a HITL gate in its guardrail policy, the run pauses and a card appears here. The sidebar badge count updates in real time. See the <a href="hitl.html">HITL Gates</a> docs for how to configure gates.</p>
+
+          <h3 class="t-h3">Pending section</h3>
+          <p class="t-body">Each pending approval is a card showing:</p>
+          <ul class="t-body">
+            <li><strong>Agent name</strong> and run ID</li>
+            <li><strong>Gate label</strong> — the name of the HITL gate that triggered the pause</li>
+            <li><strong>Payload preview</strong> — a truncated view of what the agent was about to do</li>
+            <li><strong>Waiting since</strong> — how long the run has been paused</li>
+            <li><strong>Reason textarea</strong> (optional) — annotate your decision for the audit log</li>
+            <li><span class="chip chip-ok">Approve</span> and <span class="chip chip-warn">Deny</span> action buttons</li>
+          </ul>
+          <p class="t-body">Approving resumes the run from where it paused. Denying terminates the run with exit code <code>2</code> (denied).</p>
+
+          <h3 class="t-h3">Resolved section</h3>
+          <p class="t-body">The most recently resolved approvals are shown below the pending queue. Columns: <strong>Agent</strong>, <strong>Decision</strong> (chip), <strong>Decided by</strong>, <strong>When</strong>, <strong>Reason</strong>. This section is read-only and provides an audit trail.</p>
+
+          <div class="callout callout-info">
+            Only users with <span class="role-pill">operator</span>, <span class="role-pill">admin</span>, or <span class="role-pill">owner</span> roles can approve or deny HITL gates. Viewers see the queue but the action buttons are disabled.
+          </div>
+        </section>
+
+        <!-- ── Marketplace ── -->
+        <section id="marketplace">
+          <h2 class="t-h2">Marketplace <code class="chip chip-muted">/marketplace</code></h2>
+          <p class="t-body">Browse and install curated agent templates, skills, and plugins from the Synapse Marketplace.</p>
+
+          <h3 class="t-h3">Kind filter tabs</h3>
+          <p class="t-body">Three tabs narrow the catalogue to a specific kind:</p>
+          <ul class="t-body">
+            <li><span class="chip chip-info">Agents</span> — pre-configured agent templates ready to deploy</li>
+            <li><span class="chip chip-ok">Skills</span> — reusable system-prompt fragments that add a specific capability to any agent</li>
+            <li><span class="chip chip-muted">Plugins</span> — installable daemon capabilities (tools, MCP servers)</li>
+          </ul>
+
+          <h3 class="t-h3">Search</h3>
+          <p class="t-body">Filter the visible items by name or description. Results update as you type.</p>
+
+          <h3 class="t-h3">Item card</h3>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr><th>Field</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Icon</td><td>Marketplace item logo or generated placeholder</td></tr>
+                <tr><td>Name</td><td>Display name</td></tr>
+                <tr><td>Description</td><td>Short one-line summary</td></tr>
+                <tr><td>Platform compat</td><td>OS chips: <span class="chip chip-muted">Win</span> <span class="chip chip-muted">Mac</span> <span class="chip chip-muted">Linux</span></td></tr>
+                <tr><td>Required capabilities</td><td>Daemon capabilities that must be present before install</td></tr>
+                <tr><td>Permissions</td><td>What the item requests (e.g. <code>repo:read</code>, <code>fs:write</code>)</td></tr>
+                <tr><td>Version</td><td>Semver of the latest release</td></tr>
+                <tr><td>Rating / Installs</td><td>Community rating and all-time install count</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 class="t-h3">Install flow</h3>
+          <ul class="t-body">
+            <li><strong>Agents</strong> — clicking Install opens the New Agent wizard pre-populated with the template's config. Review and adjust before deploying.</li>
+            <li><strong>Skills / Plugins</strong> — a daemon picker dialog appears first. Select which daemon(s) should receive the capability, then confirm. Provisioning runs in the background; the capability state chip updates when complete.</li>
+          </ul>
+
+          <h3 class="t-h3">Included items</h3>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr><th>Kind</th><th>Items</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Agents</td><td><code>pr-reviewer</code>, <code>support-triage</code>, <code>release-captain</code>, <code>incident-commander</code></td></tr>
+                <tr><td>Skills</td><td><code>security-scan</code>, <code>sql-explain</code>, <code>doc-writer</code>, <code>test-author</code></td></tr>
+                <tr><td>Plugins</td><td><code>browser-use</code>, <code>github</code>, <code>postgres</code>, <code>slack</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- ── Webhooks ── -->
+        <section id="webhooks">
+          <h2 class="t-h2">Webhooks <code class="chip chip-muted">/webhooks</code></h2>
+          <p class="t-body">Webhooks let external services trigger agent runs by POSTing to an inbound URL. Each webhook is tied to a target agent.</p>
+
+          <h3 class="t-h3">Webhook list</h3>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr><th>Column</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Name</td><td>Human-readable label</td></tr>
+                <tr><td>Endpoint URL</td><td>The HTTPS URL to POST to, with a copy button</td></tr>
+                <tr><td>Secret</td><td>HMAC secret used to sign and verify payloads — reveal/hide toggle plus copy button</td></tr>
+                <tr><td>Target agent</td><td>The agent that runs when this webhook fires (link to Agent Detail)</td></tr>
+                <tr><td>Deliveries</td><td>Count of POST requests received</td></tr>
+                <tr><td>Created</td><td>Creation date</td></tr>
+                <tr><td>Enabled</td><td>Toggle to pause/resume the webhook without deleting it</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 class="t-h3">Create webhook</h3>
+          <p class="t-body">Click <strong>New Webhook</strong> and provide: <strong>Name</strong> and <strong>Target agent</strong> (select from dropdown). A URL and secret are generated automatically.</p>
+
+          <h3 class="t-h3">Delivery history</h3>
+          <p class="t-body">Expand any webhook row to see a log of every delivery attempt. Columns: <strong>Timestamp</strong>, <strong>Webhook name</strong>, <strong>HTTP status code</strong>, <strong>Response snippet</strong>, <strong>Run status</strong>. Failed deliveries (non-2xx) are highlighted in red.</p>
+
+          <div class="callout callout-info">
+            Synapse signs every inbound webhook payload with HMAC-SHA256. The signature is sent in the <code>X-Synapse-Signature</code> header. Your service should verify this signature against the stored secret before trusting the payload. See the <a href="api.html">API Reference</a> for the verification algorithm.
+          </div>
+        </section>
+
+        <!-- ── Notifications ── -->
+        <section id="notifications">
+          <h2 class="t-h2">Notifications <code class="chip chip-muted">/notifications</code></h2>
+          <p class="t-body">Configure where Synapse sends event notifications — Slack, Discord, or email — and create routing rules that map event types to specific channels.</p>
+
+          <h3 class="t-h3">Channels tab</h3>
+          <p class="t-body">Add and manage notification destinations:</p>
+          <ul class="t-body">
+            <li><strong>Slack</strong> — provide a channel name and bot token. The bot must have <code>chat:write</code> scope in the target workspace.</li>
+            <li><strong>Discord</strong> — provide a guild ID and channel ID. Use a bot token with <code>SEND_MESSAGES</code> permission.</li>
+            <li><strong>Email</strong> — add an email address. Synapse sends HTML email via the platform mailer.</li>
+          </ul>
+          <p class="t-body">Each channel has an enabled/disabled toggle so you can pause delivery without deleting the config.</p>
+
+          <h3 class="t-h3">Routing rules tab</h3>
+          <p class="t-body">A routing rule maps one event type to one destination channel, optionally scoped to specific agents.</p>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr><th>Field</th><th>Options</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Event type</td>
+                  <td>
+                    <code>hitl.approval</code> — HITL gate paused<br>
+                    <code>alert.prompt-injection</code> — injection attempt detected<br>
+                    <code>run.failed</code> — run exited non-zero<br>
+                    <code>run.passed</code> — run exited cleanly<br>
+                    <code>budget.exceeded</code> — spend exceeded configured limit
+                  </td>
+                </tr>
+                <tr>
+                  <td>Agent scope</td>
+                  <td>All agents / specific agent (by name) / agents matching a tag</td>
+                </tr>
+                <tr>
+                  <td>Destination</td>
+                  <td>Select from configured channels in the Channels tab</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="t-body">Multiple rules can match the same event — every matching rule fires, so a single <code>run.failed</code> event can notify both Slack and email if two rules are configured.</p>
+        </section>
+
+        <!-- ── Settings ── -->
+        <section id="settings">
+          <h2 class="t-h2">Settings <code class="chip chip-muted">/settings</code></h2>
+          <p class="t-body">The Settings screen manages org-level configuration across six tabs.</p>
+
+          <h3 class="t-h3">Profile tab</h3>
+          <p class="t-body">View and edit core org metadata:</p>
+          <ul class="t-body">
+            <li><strong>Org name</strong> — display name used throughout the UI</li>
+            <li><strong>Region</strong> — data residency region (set at org creation, read-only after)</li>
+            <li><strong>Plan</strong> — current subscription tier (Free / Pro / Team / Enterprise)</li>
+            <li><strong>Owner</strong> — current owner's email</li>
+            <li><strong>Created</strong> — org creation date</li>
+            <li><strong>Workspace ID</strong> — immutable UUID used in API calls</li>
+          </ul>
+
+          <h3 class="t-h3">Members &amp; RBAC tab</h3>
+          <p class="t-body">Current member table columns: <strong>Name</strong>, <strong>Email</strong>, <strong>Role</strong> (<span class="role-pill">owner</span> / <span class="role-pill">admin</span> / <span class="role-pill">operator</span> / <span class="role-pill">viewer</span>), <strong>MFA status</strong>, <strong>Last active</strong>.</p>
+
+          <p class="t-body">Invite a new member by entering their email and selecting a role, then clicking <strong>Send invite</strong>. Pending invitations are listed below the members table with a <strong>Revoke invite</strong> button.</p>
+
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr><th>Role</th><th>Permissions</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="role-pill">owner</span></td>
+                  <td>Full control: billing, all settings, all actions, transfer or delete org</td>
+                </tr>
+                <tr>
+                  <td><span class="role-pill">admin</span></td>
+                  <td>Deploy and manage agents, manage members, approve HITL, view (not create) secrets</td>
+                </tr>
+                <tr>
+                  <td><span class="role-pill">operator</span></td>
+                  <td>Deploy and edit agents, approve HITL gates — cannot see secret values</td>
+                </tr>
+                <tr>
+                  <td><span class="role-pill">viewer</span></td>
+                  <td>Read-only: runs, traces, alerts, dashboards — no write actions</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 class="t-h3">Teams tab</h3>
+          <p class="t-body">Teams are hierarchical sub-groups within an org used for organising members into business units or project groups. Teams do not grant access — that is governed by each member's org role.</p>
+          <ul class="t-body">
+            <li><strong>Team tree</strong> — hierarchical view of all teams with parent/child nesting</li>
+            <li><strong>Create team</strong> — name + optional parent team</li>
+            <li><strong>Per-team member list</strong> — add or remove members from a team</li>
+            <li><strong>Delete team</strong> — requires confirmation; child teams are promoted to top-level</li>
+          </ul>
+
+          <h3 class="t-h3">Billing &amp; Usage tab</h3>
+          <ul class="t-body">
+            <li><strong>Current plan</strong> — name, seat limit, included compute credits</li>
+            <li><strong>Usage this month</strong> — spend (USD) and seat count vs. plan limits, with progress bars</li>
+            <li><strong>Invoice history</strong> — table: period, amount, status chip, PDF download link</li>
+          </ul>
+
+          <h3 class="t-h3">API Tokens tab</h3>
+          <p class="t-body">Create bearer tokens for programmatic API access.</p>
+          <ul class="t-body">
+            <li><strong>Create token</strong> — name + scope: <code>read</code> (GET only) or <code>deploy</code> (read + write + trigger runs). Token value is shown once on creation and never again.</li>
+            <li><strong>Token list</strong> — name, prefix (first 8 chars), scope, created date, last used date</li>
+            <li><strong>Revoke</strong> button — requires confirmation; invalidates the token immediately</li>
+          </ul>
+          <div class="callout callout-warn">
+            Copy the token value immediately after creation. It is shown only once and cannot be recovered. If you lose it, revoke and create a new token.
+          </div>
+
+          <h3 class="t-h3">Authentication tab</h3>
+          <p class="t-body">Org-wide authentication policy (owner-only access):</p>
+          <ul class="t-body">
+            <li><strong>Require MFA for all members</strong> — when enabled, members without an enrolled MFA factor are blocked from the UI until they complete enrollment</li>
+            <li><strong>Per-member MFA status</strong> — table showing each member and whether they have an enrolled factor</li>
+          </ul>
+        </section>
+
+        <!-- ── Account Security ── -->
+        <section id="account-security">
+          <h2 class="t-h2">Account Security <code class="chip chip-muted">/account/security</code></h2>
+          <p class="t-body">Personal multi-factor authentication enrollment. Each user manages their own MFA factors here, independent of org membership.</p>
+
+          <h3 class="t-h3">Enrolled factors list</h3>
+          <p class="t-body">Columns: <strong>Type</strong> (<span class="chip chip-info">TOTP</span> / <span class="chip chip-ok">WebAuthn</span>), <strong>Label</strong> (name you gave the factor), <strong>Status</strong> (<span class="chip chip-ok">verified</span> / <span class="chip chip-warn">unverified</span>), <strong>Remove</strong> button. You must have at least one remaining verified factor before you can remove another — this prevents accidental lockout.</p>
+
+          <h3 class="t-h3">Add TOTP (authenticator app)</h3>
+          <ol class="t-body">
+            <li>Click <strong>Add authenticator app</strong>.</li>
+            <li>Scan the QR code with your authenticator app (Google Authenticator, Authy, 1Password, etc.). The manual key is displayed below the QR code if you cannot scan.</li>
+            <li>Enter the 6-digit code shown in your app and click <strong>Verify</strong>.</li>
+            <li>Give the factor a label (e.g. <em>iPhone — Authy</em>) and save.</li>
+          </ol>
+
+          <h3 class="t-h3">Add WebAuthn (security key or passkey)</h3>
+          <ol class="t-body">
+            <li>Click <strong>Add security key / passkey</strong>.</li>
+            <li>Your browser prompts for your biometric or hardware key (Touch ID, Face ID, Windows Hello, or FIDO2 hardware key).</li>
+            <li>Complete the browser prompt.</li>
+            <li>Give the credential a label (e.g. <em>YubiKey 5C</em>) and save.</li>
+          </ol>
+
+          <h3 class="t-h3">Recovery codes</h3>
+          <p class="t-body">Recovery codes are single-use bypass tokens that work when all MFA factors are inaccessible (e.g. lost phone, broken key). Click <strong>View recovery codes</strong> to reveal your codes. Click <strong>Regenerate</strong> to invalidate the existing set and generate a fresh batch.</p>
+          <div class="callout callout-warn">
+            Store recovery codes somewhere safe — a password manager, printed sheet in a secure location, or offline backup. They are your last resort if you lose access to all your MFA factors. Each code can only be used once.
+          </div>
+        </section>
+
+        <!-- ── Organizations ── -->
+        <section id="organizations">
+          <h2 class="t-h2">Organizations <code class="chip chip-muted">/account/organizations</code></h2>
+          <p class="t-body">Switch between your workspaces or create a new org. Each org is an isolated workspace with its own daemons, agents, members, and billing.</p>
+
+          <h3 class="t-h3">Personal workspace card</h3>
+          <p class="t-body">Your personal workspace always appears first. If it is the currently active org it shows an <span class="chip chip-ok">Active</span> badge. The personal workspace cannot be deleted or transferred.</p>
+
+          <h3 class="t-h3">Org cards</h3>
+          <p class="t-body">Each org you are a member of appears as a card showing:</p>
+          <ul class="t-body">
+            <li><strong>Org name</strong></li>
+            <li><strong>Plan badge</strong> — <span class="chip chip-muted">Free</span> / <span class="chip chip-info">Pro</span> / <span class="chip chip-ok">Team</span> / <span class="chip chip-warn">Enterprise</span></li>
+            <li><strong>Member count</strong></li>
+            <li><strong>Switch to</strong> button — sets this org as the active context; all subsequent API calls are scoped to it</li>
+            <li><strong>Open settings</strong> button — navigates directly to this org's Settings page</li>
+          </ul>
+
+          <h3 class="t-h3">Create org</h3>
+          <p class="t-body">Enter a name in the <strong>Create a new organization</strong> form and click <strong>Create</strong>. You are automatically set as the owner of the new org.</p>
+          <div class="callout callout-info">
+            Additional organizations beyond your personal workspace are available on Team and Enterprise plans. On the Free or Pro plan you can create one org (your personal workspace). Upgrade from <a href="/settings">Settings → Billing &amp; Usage</a> to add more.
+          </div>
+        </section>
+
+        <!-- ── Next Steps ── -->
+        <section id="next-steps">
+          <h2 class="t-h2">Next steps</h2>
+          <div class="panel-light">
+            <p class="t-body" style="margin-bottom:0.75rem;">Now that you know your way around the Web UI, dive deeper into these topics:</p>
+            <ul class="t-body" style="margin:0;">
+              <li><a href="agents.html">Agents</a> — full agent lifecycle: create, configure, schedule, and monitor</li>
+              <li><a href="daemons.html">Daemons</a> — install, register, and manage worker daemons</li>
+              <li><a href="hitl.html">HITL Gates</a> — configure human-in-the-loop approval gates in guardrail policies</li>
+              <li><a href="rbac.html">RBAC &amp; Roles</a> — fine-grained permission breakdown by action and role</li>
+              <li><a href="capabilities.html">Capabilities &amp; MCP</a> — add tools and MCP servers to your agents</li>
+              <li><a href="api.html">API Reference</a> — programmatic access to every Synapse resource</li>
+            </ul>
+          </div>
+        </section>
+
+      </article>
+    </main>
+  </div>
+
+  <script src="../assets/main.js"></script>
+</body>
+</html>

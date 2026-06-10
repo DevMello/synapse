@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Marketplace &amp; Extensions — Synapse Docs</title>
+  <link rel="stylesheet" href="../assets/styles.css" />
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a class="nav-logo" href="../index.html">
+      <span class="logo-mark"></span>
+      Synapse
+    </a>
+    <div class="nav-links">
+      <a href="../docs/getting-started.html">Docs</a>
+      <a href="../docs/cli.html">CLI</a>
+      <a href="../docs/use-cases.html">Use Cases</a>
+      <a href="../docs/faq.html">FAQ</a>
+      <a class="btn-primary" href="../docs/getting-started.html">Get Started</a>
+    </div>
+  </div>
+</nav>
+
+<div class="docs-layout">
+  <aside class="docs-sidebar">
+    <h3>Documentation</h3>
+    <nav class="sidebar-nav">
+      <a href="getting-started.html">Getting Started</a>
+      <a href="concepts.html">Concepts</a>
+      <a href="daemon.html">Daemon</a>
+      <a href="agents.html">Agents</a>
+      <a href="hitl.html">Human-in-the-Loop</a>
+      <a href="security.html">Security</a>
+      <a href="web-ui.html">Web UI</a>
+      <a href="scheduling.html">Scheduling</a>
+      <a href="marketplace.html">Marketplace</a>
+      <a href="orchestration.html">Orchestration</a>
+      <a href="memory.html">Memory</a>
+      <a href="cli.html">CLI Reference</a>
+      <a href="use-cases.html">Use Cases</a>
+      <a href="faq.html">FAQ</a>
+    </nav>
+  </aside>
+
+  <main class="docs-content">
+    <div class="doc-hero">
+      <div class="kicker">Marketplace</div>
+      <h1>Marketplace &amp; Extensions</h1>
+      <p>A curated collection of ready-to-use agent templates, skills, and plugins. Browse in Web UI → Marketplace, click Install — everything lands locally on your daemon. The cloud relays the manifest; your daemon does the installing.</p>
+    </div>
+
+    <!-- 1. Overview -->
+    <section class="doc-section" id="overview">
+      <h2>Overview</h2>
+      <p>The Synapse Marketplace is organized into three categories:</p>
+      <ul>
+        <li><strong>Agent Templates</strong> — pre-built agent configurations with prompts, rulesets, and triggers that you can deploy and customize.</li>
+        <li><strong>Skills</strong> — reusable tool bundles that extend what an existing agent can do without rewriting its config.</li>
+        <li><strong>Plugins</strong> — system integrations that give agents access to new capabilities: browsers, databases, external APIs.</li>
+      </ul>
+      <p>All three types follow the same trust model: the cloud stores and serves the manifest (name, version, commit hash, permissions required) but never executes anything. Your daemon fetches, verifies, and installs the package locally. The install is pinned to the exact commit hash recorded in the manifest so you always know precisely what code is running.</p>
+
+      <div class="callout info">
+        <span class="callout-icon">&#8505;</span>
+        <p>Marketplace items can be installed via the Web UI or the <code>synapse plugin install</code> CLI command. Both paths route through the daemon — nothing is installed cloud-side.</p>
+      </div>
+    </section>
+
+    <!-- 2. Agent Templates -->
+    <section class="doc-section" id="agent-templates">
+      <h2>Agent Templates</h2>
+      <p>Agent templates are complete, deployable agent configurations. Each template ships with a default system prompt, a ruleset, recommended triggers, and a declared list of required capabilities. You can deploy a template as-is or use it as a starting point and override any field.</p>
+
+      <div class="card-grid">
+        <div class="mkt-card">
+          <h4>pr-reviewer</h4>
+          <p>Reviews GitHub pull requests, posts inline comments on changed lines, summarizes the diff, and flags potential issues. Requires HITL approval before posting any merge suggestion.</p>
+          <div class="tags">
+            <span class="tag">github</span>
+            <span class="tag">network</span>
+            <span class="tag hitl">HITL: merge</span>
+            <span class="tag verified">verified</span>
+          </div>
+        </div>
+
+        <div class="mkt-card">
+          <h4>support-triage</h4>
+          <p>Classifies incoming support tickets by severity and category, routes them to the appropriate queue, and drafts initial responses for agent review.</p>
+          <div class="tags">
+            <span class="tag">network</span>
+            <span class="tag">filesystem</span>
+            <span class="tag hitl">HITL: send</span>
+            <span class="tag verified">verified</span>
+          </div>
+        </div>
+
+        <div class="mkt-card">
+          <h4>release-captain</h4>
+          <p>Orchestrates the full release process: runs test suites, generates a structured changelog from commit history, and creates a GitHub release draft for human review.</p>
+          <div class="tags">
+            <span class="tag">github</span>
+            <span class="tag">exec</span>
+            <span class="tag hitl">HITL: publish</span>
+            <span class="tag verified">verified</span>
+          </div>
+        </div>
+
+        <div class="mkt-card">
+          <h4>incident-commander</h4>
+          <p>Monitors alert feeds, pages on-call engineers via PagerDuty or Slack, and coordinates incident response. Requires HITL approval before executing any remediation action.</p>
+          <div class="tags">
+            <span class="tag">slack</span>
+            <span class="tag">network</span>
+            <span class="tag hitl">HITL: remediate</span>
+            <span class="tag verified">verified</span>
+          </div>
+        </div>
+      </div>
+
+      <h3>Installing a template</h3>
+      <p>Templates are installed the same way as any other marketplace item. Once installed, the template appears under <strong>Web UI → Agents → New Agent → From Template</strong>. You can override any field before deploying.</p>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">terminal</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$</span> synapse plugin install template:pr-reviewer</div>
+          <div class="term-out info">Fetching manifest for template:pr-reviewer@1.4.2...</div>
+          <div class="term-out ok">Verified commit hash a3f8c21d</div>
+          <div class="term-out ok">Installed template:pr-reviewer — ready in Web UI → Agents → New Agent</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Skills -->
+    <section class="doc-section" id="skills">
+      <h2>Skills</h2>
+      <p>Skills are reusable tool bundles. Install a skill and any agent you configure can reference it by name in its <code>tools</code> list. Skills do not carry their own prompts or triggers — they extend an agent's toolbox.</p>
+
+      <div class="card-grid">
+        <div class="mkt-card">
+          <h4>security-scan</h4>
+          <p>Runs SAST analysis and dependency audits on a codebase. Supports Node.js, Python, Go, and Rust projects. Outputs a structured findings report.</p>
+          <div class="tags">
+            <span class="tag">filesystem</span>
+            <span class="tag">exec</span>
+            <span class="tag verified">verified</span>
+          </div>
+        </div>
+
+        <div class="mkt-card">
+          <h4>sql-explain</h4>
+          <p>Connects to a PostgreSQL or MySQL instance, runs EXPLAIN ANALYZE on slow queries, and returns a human-readable optimization recommendation.</p>
+          <div class="tags">
+            <span class="tag">postgres</span>
+            <span class="tag verified">verified</span>
+          </div>
+        </div>
+
+        <div class="mkt-card">
+          <h4>doc-writer</h4>
+          <p>Generates structured API documentation from OpenAPI specs or annotated source code. Outputs Markdown, MDX, or HTML.</p>
+          <div class="tags">
+            <span class="tag">filesystem</span>
+            <span class="tag verified">verified</span>
+          </div>
+        </div>
+
+        <div class="mkt-card">
+          <h4>test-author</h4>
+          <p>Generates unit and integration tests from existing source code. Detects the test framework in use and follows existing conventions in the repository.</p>
+          <div class="tags">
+            <span class="tag">filesystem</span>
+            <span class="tag">exec</span>
+            <span class="tag verified">verified</span>
+          </div>
+        </div>
+      </div>
+
+      <h3>Installing a skill</h3>
+      <pre><code>synapse plugin install skill:security-scan
+synapse plugin install skill:sql-explain
+synapse plugin install skill:doc-writer
+synapse plugin install skill:test-author</code></pre>
+
+      <p>After installation, reference a skill in your agent config under <code>tools</code>:</p>
+      <pre><code># synapse-agent.toml
+[agent]
+name = "code-auditor"
+tools = ["skill:security-scan", "skill:doc-writer"]</code></pre>
+    </section>
+
+    <!-- 4. Plugins -->
+    <section class="doc-section" id="plugins">
+      <h2>Plugins</h2>
+      <p>Plugins are system integrations that give agents access to new runtime capabilities. Unlike skills (which are pure tool bundles), plugins may require daemon-level capability grants and environment variables.</p>
+
+      <div class="callout warning">
+        <span class="callout-icon">&#9888;</span>
+        <p><strong>Plugins run at daemon trust level.</strong> A plugin has the same process permissions as the daemon itself. Review what a plugin requests before approving the capability grant. No plugin can bypass rulesets or HITL checkpoints, but it does run in your daemon's process space.</p>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Plugin</th>
+            <th>Description</th>
+            <th>Required Capability</th>
+            <th>Required Env Var</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>browser-use</code></td>
+            <td>Headless browser control via Playwright. Lets agents navigate pages, fill forms, extract content, and take screenshots.</td>
+            <td><code>browser</code></td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td><code>github</code></td>
+            <td>Full GitHub API access: read and write PRs, issues, releases, and repo contents.</td>
+            <td><code>network</code></td>
+            <td><code>GITHUB_TOKEN</code></td>
+          </tr>
+          <tr>
+            <td><code>postgres</code></td>
+            <td>Direct PostgreSQL connection for query execution and schema introspection. Supports read-only and read-write modes.</td>
+            <td><code>network</code></td>
+            <td><code>DATABASE_URL</code></td>
+          </tr>
+          <tr>
+            <td><code>slack</code></td>
+            <td>Post messages, read channels, react to threads, and listen for mentions as a Slack bot.</td>
+            <td><code>network</code></td>
+            <td><code>SLACK_BOT_TOKEN</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Installing a plugin</h3>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">terminal</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$</span> synapse plugin install github</div>
+          <div class="term-out info">Fetching manifest for plugin:github@2.1.0...</div>
+          <div class="term-out ok">Verified commit hash 7bd9e14f</div>
+          <div class="term-out warn">Capability required: network — approve in Web UI or run with --approve-caps</div>
+          <div><span class="term-prompt">$</span> synapse plugin install github --approve-caps</div>
+          <div class="term-out ok">Capability granted: network → agent:* (can be narrowed per-agent)</div>
+          <div class="term-out ok">Plugin installed. Set GITHUB_TOKEN in your daemon environment to activate.</div>
+        </div>
+      </div>
+
+      <h3>Listing installed plugins</h3>
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">terminal</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$</span> synapse plugin list</div>
+          <div class="term-out">NAME              TYPE      VERSION   STATUS</div>
+          <div class="term-out">────────────────  ────────  ────────  ──────────</div>
+          <div class="term-out ok">github            plugin    2.1.0     active</div>
+          <div class="term-out ok">slack             plugin    1.8.3     active</div>
+          <div class="term-out ok">skill:security-scan  skill  1.2.1   active</div>
+          <div class="term-out ok">skill:doc-writer  skill     1.0.5     active</div>
+          <div class="term-out warn">browser-use       plugin    1.5.0     needs Chromium</div>
+          <div class="term-out">template:pr-reviewer  template  1.4.2  installed</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. Installing from Marketplace -->
+    <section class="doc-section" id="installing">
+      <h2>Installing from the Marketplace</h2>
+      <p>You can install any marketplace item via the Web UI or the CLI. Both paths are equivalent — the Web UI generates and dispatches the same install command that the CLI runs directly.</p>
+
+      <h3>Web UI installation flow</h3>
+      <div class="steps">
+        <div class="step">
+          <div class="step-body">
+            <h4>Browse or search</h4>
+            <p>Open Web UI → Marketplace. Use the search bar or filter by category (Templates, Skills, Plugins). Each card shows a description, required capabilities, and the verified badge if applicable.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-body">
+            <h4>Click Install</h4>
+            <p>Click the Install button on any marketplace card. This triggers the capability provisioning dialog before anything is downloaded.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-body">
+            <h4>Review the capability provisioning dialog</h4>
+            <p>The dialog lists every permission the plugin or skill will need: capabilities (browser, network, filesystem, exec) and any required environment variables. Read this carefully — you are granting daemon-level access.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-body">
+            <h4>Confirm</h4>
+            <p>Click Confirm. The cloud sends the install command to your daemon over the existing outbound WebSocket connection. Your daemon fetches the package, verifies the commit hash, and installs it locally. No files are staged cloud-side.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-body">
+            <h4>Agent picks up the new capability</h4>
+            <p>The next time an agent runs, the new tool or plugin is available. Running agents pick up the change on their next invocation — there is no restart required for the daemon.</p>
+          </div>
+        </div>
+      </div>
+
+      <h3>CLI installation</h3>
+      <pre><code># Install a plugin
+synapse plugin install github
+
+# Install a skill
+synapse plugin install skill:security-scan
+
+# Install a template
+synapse plugin install template:pr-reviewer
+
+# Install a specific version
+synapse plugin install github@2.1.0
+
+# Skip the interactive capability approval prompt
+synapse plugin install browser-use --approve-caps</code></pre>
+    </section>
+
+    <!-- 6. Capability Provisioning Flow -->
+    <section class="doc-section" id="capability-provisioning">
+      <h2>Capability Provisioning Flow</h2>
+      <p>When a plugin requires a system capability — <code>browser</code>, <code>network</code>, <code>filesystem</code>, or <code>exec</code> — Synapse shows a provisioning dialog before installation proceeds. Grants are per-agent by default, which means one agent's browser permission does not automatically extend to other agents running in the same daemon.</p>
+
+      <h3>How it works</h3>
+      <ul>
+        <li>The capability dialog shows the exact permission name, what the plugin will use it for, and which agents it will apply to.</li>
+        <li>An admin (any user with the <code>admin</code> role on the daemon) must approve the grant.</li>
+        <li>Grants are stored in the daemon's local config and reflected in the Web UI → Daemon → Capabilities panel.</li>
+        <li>Grants can be revoked at any time without uninstalling the plugin — the plugin simply stops being able to exercise the capability.</li>
+      </ul>
+
+      <h3>Capability grant table</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Agent</th>
+            <th>Capability</th>
+            <th>Granted By</th>
+            <th>Granted At</th>
+            <th>Scope</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>pr-reviewer</code></td>
+            <td><code>network</code></td>
+            <td>admin@example.com</td>
+            <td>2025-11-14 09:22 UTC</td>
+            <td>github.com only</td>
+          </tr>
+          <tr>
+            <td><code>incident-commander</code></td>
+            <td><code>network</code></td>
+            <td>admin@example.com</td>
+            <td>2025-11-14 09:25 UTC</td>
+            <td>unrestricted</td>
+          </tr>
+          <tr>
+            <td><code>ui-tester</code></td>
+            <td><code>browser</code></td>
+            <td>ops@example.com</td>
+            <td>2025-11-20 14:03 UTC</td>
+            <td>internal domains</td>
+          </tr>
+          <tr>
+            <td><code>release-captain</code></td>
+            <td><code>exec</code></td>
+            <td>admin@example.com</td>
+            <td>2025-11-21 11:48 UTC</td>
+            <td>make, npm, cargo</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout tip">
+        <span class="callout-icon">&#10003;</span>
+        <p>Use scoped grants wherever possible. Granting <code>network</code> to a specific domain rather than <code>unrestricted</code> limits blast radius if an agent is ever misused or misconfigured.</p>
+      </div>
+    </section>
+
+    <!-- 7. Platform Compatibility -->
+    <section class="doc-section" id="platform-compatibility">
+      <h2>Platform Compatibility</h2>
+      <p>Most plugins and skills work identically on all three supported platforms. Exceptions are noted below.</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Plugin / Skill</th>
+            <th>macOS</th>
+            <th>Linux</th>
+            <th>Windows</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>browser-use</code></td>
+            <td>Yes</td>
+            <td>Yes</td>
+            <td>Yes</td>
+            <td>Requires Chromium. Run <code>npx playwright install chromium</code> after plugin install. On Linux, a display server or Xvfb is required for non-headless mode.</td>
+          </tr>
+          <tr>
+            <td><code>github</code></td>
+            <td>Yes</td>
+            <td>Yes</td>
+            <td>Yes</td>
+            <td>No platform-specific requirements. Set <code>GITHUB_TOKEN</code> in daemon environment.</td>
+          </tr>
+          <tr>
+            <td><code>postgres</code></td>
+            <td>Yes</td>
+            <td>Yes</td>
+            <td>Yes</td>
+            <td>Connects over TCP — no local Postgres install required on the daemon host.</td>
+          </tr>
+          <tr>
+            <td><code>slack</code></td>
+            <td>Yes</td>
+            <td>Yes</td>
+            <td>Yes</td>
+            <td>No platform-specific requirements. Set <code>SLACK_BOT_TOKEN</code> in daemon environment.</td>
+          </tr>
+          <tr>
+            <td><code>skill:security-scan</code></td>
+            <td>Yes</td>
+            <td>Yes</td>
+            <td>Partial</td>
+            <td>SAST tooling for Go and Rust may require platform-specific build toolchains. Node.js and Python audit fully supported on all platforms.</td>
+          </tr>
+          <tr>
+            <td><code>skill:sql-explain</code></td>
+            <td>Yes</td>
+            <td>Yes</td>
+            <td>Yes</td>
+            <td>Requires the <code>postgres</code> plugin to be installed.</td>
+          </tr>
+          <tr>
+            <td><code>skill:doc-writer</code></td>
+            <td>Yes</td>
+            <td>Yes</td>
+            <td>Yes</td>
+            <td>No platform-specific requirements.</td>
+          </tr>
+          <tr>
+            <td><code>skill:test-author</code></td>
+            <td>Yes</td>
+            <td>Yes</td>
+            <td>Yes</td>
+            <td>Test execution requires the appropriate runtime (Node, Python, Go, Rust) to be available in the daemon's PATH.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 8. Publishing to Marketplace -->
+    <section class="doc-section" id="publishing">
+      <h2>Publishing to the Marketplace</h2>
+      <p>Anyone can submit a plugin, skill, or template to the Synapse Marketplace. Community-submitted items receive a <strong>community</strong> badge; items reviewed and validated by the Synapse team receive the <strong>verified</strong> badge.</p>
+
+      <h3>Step 1 — Create the manifest</h3>
+      <p>Add a <code>synapse-plugin.toml</code> file to the root of your repository:</p>
+      <pre><code>[plugin]
+name        = "my-plugin"
+version     = "1.0.0"
+type        = "plugin"           # plugin | skill | template
+description = "A short description shown in the marketplace."
+author      = "Your Name &lt;you@example.com&gt;"
+license     = "MIT"
+
+[capabilities]
+required = ["network"]           # capabilities the plugin needs
+
+[env]
+required = ["MY_API_KEY"]        # env vars the user must provide
+optional = ["MY_API_ENDPOINT"]   # env vars with defaults
+
+[compat]
+min_daemon = "0.9.0"</code></pre>
+
+      <h3>Step 2 — Push to a public git repository</h3>
+      <p>The manifest and all plugin source must be in a publicly accessible git repository. Synapse pins installs to the exact commit hash, so all published versions must remain immutable — do not force-push tags.</p>
+
+      <h3>Step 3 — Submit via Web UI</h3>
+      <p>Go to <strong>Web UI → Marketplace → Submit</strong>. Paste your repository URL and select the version tag to submit. The submission form validates your manifest against the current schema before sending.</p>
+
+      <h3>Review process</h3>
+      <ul>
+        <li><strong>Community review</strong> — automated checks: manifest schema validation, no hardcoded secrets, declared capabilities match actual API calls. Typically completes within minutes. Items pass as <em>community</em>.</li>
+        <li><strong>Verified review</strong> — manual code review by the Synapse team. Checks for security issues, capability over-claiming, and adherence to the plugin API contract. Submit a verified review request via the marketplace submission form. Typically takes 3–5 business days.</li>
+      </ul>
+
+      <div class="callout info">
+        <span class="callout-icon">&#8505;</span>
+        <p>To update a published plugin, push a new tag to your repository and re-submit the new version via Web UI → Marketplace → Submit. Old versions remain installable by pinning: <code>synapse plugin install my-plugin@1.0.0</code>.</p>
+      </div>
+    </section>
+
+    <!-- 9. Security Model -->
+    <section class="doc-section" id="security-model">
+      <h2>Security Model</h2>
+      <p>Understanding how plugins interact with the Synapse security model is essential before granting capabilities.</p>
+
+      <h3>Trust level</h3>
+      <p>Plugins run inside the daemon process. They share the daemon's OS-level permissions and can access anything the daemon can access — subject to the capability grants you have approved. There is no sandbox isolation between the daemon and its plugins. Treat a plugin install with the same scrutiny you would apply to installing a system package.</p>
+
+      <h3>What plugins cannot do</h3>
+      <ul>
+        <li>A plugin <strong>cannot bypass a ruleset</strong>. All agent actions, including tool calls made via plugins, pass through the ruleset evaluation engine before execution.</li>
+        <li>A plugin <strong>cannot skip HITL checkpoints</strong>. If an agent's ruleset requires human approval before a specific action, the plugin must wait for that approval even if the plugin code itself does not reference HITL.</li>
+        <li>A plugin <strong>cannot exfiltrate raw secrets</strong> to the cloud. The cloud connection from the daemon is write-only for results and read-only for commands — plugins cannot open new outbound channels.</li>
+      </ul>
+
+      <h3>Commit-hash pinning</h3>
+      <p>Every installed plugin is pinned to the exact commit hash recorded in the manifest at install time. Synapse will not silently update a plugin. To update, you must explicitly run <code>synapse plugin update &lt;name&gt;</code>, which re-runs the capability provisioning dialog so you can review what changed.</p>
+
+      <h3>Auditing installed plugins</h3>
+      <p>Run <code>synapse daemon status --verbose</code> to see all installed plugins, their pinned commit hashes, the capabilities they hold, and the last time each was used by an agent. This output is also visible in <strong>Web UI → Daemon → Plugins</strong>.</p>
+
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">terminal</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$</span> synapse daemon status --verbose</div>
+          <div class="term-out info">Daemon v0.12.4 — running (pid 8431)</div>
+          <div class="term-out">Installed plugins:</div>
+          <div class="term-out">  github          v2.1.0  commit:7bd9e14f  caps:[network]  last-used:2h ago</div>
+          <div class="term-out">  slack           v1.8.3  commit:c9a2d55e  caps:[network]  last-used:14m ago</div>
+          <div class="term-out">  browser-use     v1.5.0  commit:f3310ab2  caps:[browser]  last-used:never</div>
+          <div class="term-out">Installed skills:</div>
+          <div class="term-out ok">  skill:security-scan  v1.2.1  commit:88f1a390  caps:[filesystem,exec]</div>
+          <div class="term-out ok">  skill:doc-writer     v1.0.5  commit:20e7b841  caps:[filesystem]</div>
+        </div>
+      </div>
+
+      <div class="callout warning">
+        <span class="callout-icon">&#9888;</span>
+        <p>If a plugin's commit hash no longer matches the repository history (e.g. after a force-push), Synapse will flag it as <strong>tampered</strong> and refuse to load it until you explicitly re-install or remove it. Never force-push a published plugin tag.</p>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<footer class="site-footer">
+  <p>Synapse &mdash; agent infrastructure for people who ship. &nbsp;&bull;&nbsp; <a href="../docs/getting-started.html">Docs</a> &nbsp;&bull;&nbsp; <a href="../docs/security.html">Security</a> &nbsp;&bull;&nbsp; <a href="../docs/faq.html">FAQ</a></p>
+</footer>
+
+<script src="../assets/main.js"></script>
+</body>
+</html>
