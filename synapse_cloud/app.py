@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from . import ws_hub
 from .config import get_settings
@@ -55,6 +56,16 @@ async def _lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="Synapse Cloud", version="0.1.0", lifespan=_lifespan)
+
+    origins = settings.cors_origins_list
+    if origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     for router in _discover_routers():
         app.include_router(router)

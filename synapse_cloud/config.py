@@ -31,6 +31,15 @@ class Settings(BaseSettings):
     synapse_env: str = "dev"      # "test" => use in-memory fakes for side-effects
     web_ui_dist: str = ""         # path to built Web UI bundle (static mount)
 
+    # CORS — comma-separated list of allowed origins for browser API calls.
+    # In production the SPA is served from the same origin so this is unused.
+    # In development set SYNAPSE_CORS_ORIGINS=http://localhost:5173 (Vite).
+    cors_origins: str = "http://localhost:5173"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
     @property
     def is_test(self) -> bool:
         return self.synapse_env == "test"
