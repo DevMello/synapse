@@ -4,18 +4,25 @@ import { supabase, isSupabaseConfigured } from "../../lib/supabase";
 import * as mock from "../../data/mock";
 import type { Org, OrgSummary } from "../../types";
 import { toOrg } from "../adapters/org";
+import { useUI } from "../../store/ui";
+
+// Re-exported alias so Shell.tsx can import OrgRecord without changing its import site.
+export type OrgRecord = OrgSummary;
 
 export function useOrg(): UseQueryResult<Org> {
+  const activeOrgId = useUI((s) => s.activeOrgId);
   return useQuery({
-    queryKey: ["org"],
+    queryKey: ["org", activeOrgId],
     queryFn: async () => {
       if (isSupabaseConfigured && supabase) {
         const { data: auth } = await supabase.auth.getUser();
-        const { data: org, error } = await supabase
-          .from("organizations")
-          .select("*")
-          .limit(1)
-          .maybeSingle();
+        let query = supabase.from("organizations").select("*");
+        if (activeOrgId && activeOrgId !== "personal") {
+          query = query.eq("id", activeOrgId);
+        } else {
+          query = query.limit(1);
+        }
+        const { data: org, error } = await query.maybeSingle();
         if (error) throw error;
         if (!org) return mock.ORG;
         let user = null;
@@ -34,64 +41,67 @@ export function useOrg(): UseQueryResult<Org> {
   });
 }
 
-// ── Multi-org list ────────────────────────────────────────────────────────────
-// Returns all orgs the current user belongs to. Falls back to a mock list
-// (containing just the current org) until a real multi-org API is wired.
-const MOCK_ORG_SUMMARY: OrgSummary = {
-  id: "org_8f3a91c2",
-  name: mock.ORG.name,
-  plan: mock.ORG.plan,
-  initials: mock.ORG.initials,
-  isPersonal: false,
-};
-
 export function useOrgs(): UseQueryResult<OrgSummary[]> {
   return useQuery({
     queryKey: ["orgs"],
-    queryFn: async (): Promise<OrgSummary[]> => {
+    queryFn: async () => {
       if (isSupabaseConfigured && supabase) {
-        // When the real multi-org schema lands, query organizations + memberships here.
-        // For now fall back to the single-org mock so the screen compiles and renders.
-        const { data: org, error } = await supabase
-          .from("organizations")
-          .select("id, name")
-          .limit(1)
-          .maybeSingle();
+        const { data: auth } = await supabase.auth.getUser();
+        if (!auth.user) return mock.ORGS;
+        const { data, error } = await supabase
+          .from("memberships")
+          .select("org_id, organizations(id, name, settings)")
+          .eq("user_id", auth.user.id);
         if (error) throw error;
-        if (!org) return [MOCK_ORG_SUMMARY];
-        return [
-          {
+        return (data ?? []).map((row) => {
+          const org = row.organizations as { id: string; name: string; settings: unknown } | null;
+          if (!org) return null;
+          const settings = (org.settings ?? {}) as { plan?: string };
+          return {
             id: org.id,
             name: org.name,
-            plan: mock.ORG.plan, // plan not yet in schema; use mock until migration adds it
+            plan: settings.plan ?? "Starter",
             initials: org.name.slice(0, 2).toUpperCase(),
-            isPersonal: false,
-          },
-        ];
+          } satisfies OrgSummary;
+        }).filter((o): o is OrgSummary => o !== null);
       }
-      return [MOCK_ORG_SUMMARY];
+      return mock.ORGS;
     },
   });
 }
 
-// ── Create org mutation ───────────────────────────────────────────────────────
-// Returns the new org's ID on success (so the caller can navigate to its settings).
 export function useCreateOrg() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ name }: { name: string }): Promise<string | null> => {
-      if (isSupabaseConfigured && supabase) {
-        // Real implementation: POST to the cloud API or insert via Supabase RPC.
-        // Placeholder until the multi-org schema is in place.
-        void name;
-        return null;
+      // If Supabase is not configured, return a mocked ID so callers can navigate.
+      if (!isSupabaseConfigured || !supabase) {
+        await new Promise((r) => setTimeout(r, 400));
+        return `org_${Math.random().toString(36).slice(2, 10)}`;
       }
-      // Mock: simulate a short delay and return a generated ID.
-      await new Promise((r) => setTimeout(r, 400));
-      return `org_${Math.random().toString(36).slice(2, 10)}`;
+
+      const { data: auth } = await supabase.auth.getUser();
+      if (!auth.user) throw new Error("Not authenticated");
+
+      const { data: org, error: orgError } = await supabase
+        .from("organizations")
+        .insert({ name, settings: { plan: "Starter" } })
+        .select("id")
+        .single();
+      if (orgError) throw orgError;
+
+      const { error: memberError } = await supabase
+        .from("memberships")
+        .insert({ org_id: org.id, user_id: auth.user.id, role: "owner" });
+      if (memberError) throw memberError;
+
+      // Invalidate cached queries and return the new org's ID for callers.
+      qc.invalidateQueries({ queryKey: ["orgs"] });
+      qc.invalidateQueries({ queryKey: ["org"] });
+      return org.id as string;
     },
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["orgs"] });
+      /* no-op: callers rely on the returned ID */
     },
   });
 }

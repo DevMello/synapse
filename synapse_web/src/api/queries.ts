@@ -4,7 +4,7 @@
 // importing from "../api/queries" unchanged. Each hook resolves the typed mock
 // fleet until Supabase is configured (isSupabaseConfigured), then real data — the
 // single seam where the data API drops in.
-export { useOrg, useOrgs, useCreateOrg } from "./queries/org";
+export { useOrg, useOrgs, useCreateOrg, type OrgRecord } from "./queries/org";
 export { useDaemons, useDaemon } from "./queries/daemons";
 export { useAgents, useAgent } from "./queries/agents";
 export { useRuns } from "./queries/runs";

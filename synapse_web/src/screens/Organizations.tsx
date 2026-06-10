@@ -106,11 +106,10 @@ export default function Organizations() {
   const activeOrgId = useUI((s) => s.activeOrgId);
   const setActiveOrgId = useUI((s) => s.setActiveOrgId);
 
-  const { data: orgs = [] } = useOrgs();
+  const { data: orgs = [], isLoading } = useOrgs();
   const createMut = useCreateOrg();
 
   const [name, setName] = useState("");
-  const [creating, setCreating] = useState(false);
 
   function switchOrg(org: OrgSummary | "personal") {
     if (org === "personal") {
@@ -128,17 +127,16 @@ export default function Organizations() {
       showToast({ text: "Enter an organization name", variant: "warn" });
       return;
     }
-    setCreating(true);
+
     createMut.mutate(
       { name: n },
       {
         onSuccess: (newOrgId) => {
           showToast({ text: `Organization "${n}" created` });
           setName("");
-          if (newOrgId) navigate(`/org/${newOrgId}/settings`);
+          if (newOrgId) navigate(`/org/${String(newOrgId)}/settings`);
         },
         onError: (e) => showToast({ text: (e as Error).message, variant: "warn" }),
-        onSettled: () => setCreating(false),
       },
     );
   }
@@ -181,9 +179,9 @@ export default function Organizations() {
         />
       ))}
 
-      {orgs.length === 0 && (
+      {!isLoading && realOrgs.length === 0 && (
         <div className="db-mono db-muted" style={{ fontSize: 13, padding: "8px 0 16px" }}>
-          No organizations found.
+          No additional organizations yet.
         </div>
       )}
 
@@ -201,8 +199,8 @@ export default function Organizations() {
           onKeyDown={(e) => { if (e.key === "Enter") create(); }}
         />
         <div style={{ marginTop: 12 }}>
-          <Button variant="primary" icon="plus" onClick={create} disabled={creating}>
-            {creating ? "Creating…" : "Create organization"}
+          <Button variant="primary" icon="plus" onClick={create} disabled={createMut.isPending}>
+            {createMut.isPending ? "Creating…" : "Create organization"}
           </Button>
         </div>
         <p style={{ fontSize: 13, color: "var(--mute)", marginTop: 10, lineHeight: 1.5 }}>

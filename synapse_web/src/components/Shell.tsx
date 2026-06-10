@@ -1,11 +1,11 @@
 // Synapse Web UI — app shell: Sidebar + HeaderBar + CommandPalette + AppLayout.
 // Ported from the prototype's Shell.jsx; navigation now runs on react-router.
-import { Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Icon, LogoMark } from "./Primitives";
 import { Toast } from "./Common";
 import { useUI } from "../store/ui";
-import { useOrg, useAgents, useDaemons, useAlerts } from "../api/queries";
+import { useOrg, useAgents, useDaemons, useAlerts, useOrgs, type OrgRecord } from "../api/queries";
 
 interface NavItem { id: string; icon: string; name: string; path: string; badge?: "approvals" | "alerts" }
 interface NavSection { label: string; items: NavItem[] }
@@ -26,6 +26,9 @@ const NAV_SECTIONS: NavSection[] = [
     { id: "webhooks", icon: "webhook", name: "Webhooks", path: "/webhooks" },
     { id: "notifications", icon: "mail", name: "Notifications", path: "/notifications" },
   ] },
+  { label: "Account", items: [
+    { id: "organizations", icon: "building-2", name: "Organizations", path: "/organizations" },
+  ] },
 ];
 
 const VIEW_TITLES: Record<string, string> = {
@@ -33,6 +36,7 @@ const VIEW_TITLES: Record<string, string> = {
   approvals: "Approvals", alerts: "Alerts", marketplace: "Marketplace",
   webhooks: "Webhooks", notifications: "Notifications", settings: "Settings",
   connect: "Connect a device", account: "Account",
+  organizations: "Organizations", org: "Organization settings",
 };
 
 function useCounts() {
@@ -46,11 +50,140 @@ function isActive(pathname: string, path: string): boolean {
   return pathname === path || pathname.startsWith(path + "/");
 }
 
+// ── OrgSwitcher ───────────────────────────────────────────────────────────────
+
+interface OrgSwitcherProps {
+  org: { name: string; plan: string; initials: string } | undefined;
+  orgs: OrgRecord[];
+  activeOrgId: string;
+  onSelect: (id: string) => void;
+  onManage: () => void;
+}
+
+function OrgSwitcher({ org, orgs, activeOrgId, onSelect, onManage }: OrgSwitcherProps) {
+  const [open, setOpen] = useState(false);
+  const [panelPos, setPanelPos] = useState<{ bottom: number; left: number; width: number }>({ bottom: 0, left: 0, width: 220 });
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    function handler(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  function toggleOpen() {
+    if (!open && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      setPanelPos({
+        bottom: window.innerHeight - rect.top + 8,
+        left: rect.left,
+        width: rect.width,
+      });
+    }
+    setOpen((v) => !v);
+  }
+
+  // Determine display values for the button
+  const isPersonal = activeOrgId === "personal";
+  const activeOrg = isPersonal ? null : (orgs.find((o) => o.id === activeOrgId) ?? null);
+  const displayName = isPersonal ? "Personal workspace" : (activeOrg?.name ?? "Personal workspace");
+  const displayPlan = isPersonal ? "personal" : (activeOrg?.plan ?? "");
+  const displayInitials = isPersonal
+    ? (org?.initials ?? "P")
+    : (activeOrg?.initials || activeOrg?.name?.slice(0, 2).toUpperCase() || "??");
+
+  return (
+    <div ref={containerRef}>
+      {/* Dropdown panel — fixed position so sidebar overflow:hidden doesn't clip it */}
+      {open && (
+        <div
+          className="db-panel"
+          style={{
+            position: "fixed",
+            bottom: panelPos.bottom,
+            left: panelPos.left,
+            width: panelPos.width,
+            minWidth: 220,
+            zIndex: 200,
+            padding: "6px 0",
+          }}
+        >
+          {/* Personal workspace row */}
+          <button
+            className="db-nav-item"
+            style={{ width: "100%", padding: "8px 12px", gap: 8 }}
+            onClick={() => { onSelect("personal"); setOpen(false); }}
+          >
+            <span className="db-ws-avatar" style={{ fontSize: 11, minWidth: 24, height: 24 }}>
+              {org?.initials ?? "P"}
+            </span>
+            <span style={{ flex: 1, textAlign: "left", fontSize: 13 }}>Personal workspace</span>
+            {activeOrgId === "personal" && (
+              <Icon name="check" size={14} style={{ color: "var(--accent)", flexShrink: 0 }} />
+            )}
+          </button>
+
+          {/* Org rows */}
+          {orgs.map((o) => (
+            <button
+              key={o.id}
+              className="db-nav-item"
+              style={{ width: "100%", padding: "8px 12px", gap: 8 }}
+              onClick={() => { onSelect(o.id); setOpen(false); }}
+            >
+              <span className="db-ws-avatar" style={{ fontSize: 11, minWidth: 24, height: 24 }}>
+                {o.initials || o.name.slice(0, 2).toUpperCase()}
+              </span>
+              <span style={{ flex: 1, textAlign: "left", fontSize: 13 }}>{o.name}</span>
+              {activeOrgId === o.id && (
+                <Icon name="check" size={14} style={{ color: "var(--accent)", flexShrink: 0 }} />
+              )}
+            </button>
+          ))}
+
+          {/* Separator */}
+          <div style={{ borderTop: "1px solid var(--border)", margin: "6px 0" }} />
+
+          {/* Manage organizations */}
+          <button
+            className="db-nav-item"
+            style={{ width: "100%", padding: "8px 12px", gap: 8 }}
+            onClick={() => { onManage(); setOpen(false); }}
+          >
+            <Icon name="building-2" size={14} style={{ color: "var(--mute)" }} />
+            <span style={{ fontSize: 13 }}>Manage organizations</span>
+          </button>
+        </div>
+      )}
+
+      {/* Trigger button */}
+      <button className="db-ws-switch" onClick={toggleOpen}>
+        <span className="db-ws-avatar">{displayInitials}</span>
+        <span className="db-ws-meta">
+          <span className="db-ws-name">{displayName}</span>
+          <span className="db-ws-plan">{displayPlan} workspace</span>
+        </span>
+        <Icon name="chevrons-up-down" size={14} style={{ color: "var(--mute)", marginLeft: "auto" }} />
+      </button>
+    </div>
+  );
+}
+
 function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const counts = useCounts();
   const { data: org } = useOrg();
+  const { data: orgs } = useOrgs();
+  const activeOrgId = useUI((s) => s.activeOrgId);
+  const setActiveOrgId = useUI((s) => s.setActiveOrgId);
+
   return (
     <aside className="db-sidebar">
       <div className="db-brand">
@@ -89,26 +222,13 @@ function Sidebar() {
         >
           <Icon name="settings" size={16} /><span>Settings</span>
         </button>
-        <button
-          className={"db-nav-item" + (isActive(location.pathname, "/account/security") ? " active" : "")}
-          onClick={() => navigate("/account/security")}
-        >
-          <Icon name="shield" size={16} /><span>Account security</span>
-        </button>
-        <button
-          className={"db-nav-item" + (isActive(location.pathname, "/account/organizations") ? " active" : "")}
-          onClick={() => navigate("/account/organizations")}
-        >
-          <Icon name="globe" size={16} /><span>Organizations</span>
-        </button>
-        <button className="db-ws-switch">
-          <span className="db-ws-avatar">N</span>
-          <span className="db-ws-meta">
-            <span className="db-ws-name">{org?.name ?? ""}</span>
-            <span className="db-ws-plan">{org?.plan ?? ""} workspace</span>
-          </span>
-          <Icon name="chevrons-up-down" size={14} style={{ color: "var(--mute)", marginLeft: "auto" }} />
-        </button>
+        <OrgSwitcher
+          org={org ?? undefined}
+          orgs={orgs ?? []}
+          activeOrgId={activeOrgId}
+          onSelect={setActiveOrgId}
+          onManage={() => navigate("/organizations")}
+        />
       </div>
     </aside>
   );

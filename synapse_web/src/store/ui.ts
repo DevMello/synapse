@@ -19,6 +19,10 @@ export interface ResolvedApproval {
 }
 
 interface UIState {
+  // active org
+  activeOrgId: string;
+  setActiveOrgId: (id: string) => void;
+
   // command palette
   paletteOpen: boolean;
   setPalette: (open: boolean) => void;
@@ -51,6 +55,12 @@ interface UIState {
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useUI = create<UIState>((set, get) => ({
+  activeOrgId: localStorage.getItem("synapse:activeOrgId") ?? "personal",
+  setActiveOrgId: (id) => {
+    localStorage.setItem("synapse:activeOrgId", id);
+    set({ activeOrgId: id });
+  },
+
   paletteOpen: false,
   setPalette: (open) => set({ paletteOpen: open }),
   togglePalette: () => set((s) => ({ paletteOpen: !s.paletteOpen })),

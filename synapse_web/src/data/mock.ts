@@ -3,10 +3,12 @@
 // where real REST / Supabase calls drop in later.
 import type {
   Agent, Alert, Approval, Capability, CapabilityDef, Daemon, EnvVar, LogLine,
-  MemoryEntry, Org, Run, Skill, Template, TraceLine, Version,
+  MemoryEntry, Org, OrgSummary, Run, Skill, Template, TraceLine, Version,
 } from "../types";
 
-export const ORG: Org = { name: "northwind", plan: "Team", operator: "Avery Koss", initials: "AK" };
+export const ORG: Org = { id: "personal", name: "northwind", plan: "Team", operator: "Avery Koss", initials: "AK" };
+
+export const ORGS: OrgSummary[] = [{ id: "personal", name: "northwind", plan: "Team", initials: "AK", isPersonal: true }];
 
 const CAP_DEFS: CapabilityDef[] = [
   { id: "fs", name: "filesystem", kind: "MCP server", desc: "Scoped file read/write tools", builtin: true },
