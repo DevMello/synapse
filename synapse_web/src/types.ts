@@ -234,3 +234,12 @@ export interface TeamNode {
   members: TeamMemberLite[];
   children: TeamNode[];
 }
+
+// Multi-org summary — one entry per org the signed-in user belongs to.
+export interface OrgSummary {
+  id: string;
+  name: string;
+  plan: string;
+  initials: string;
+  isPersonal?: boolean;
+}

@@ -42,6 +42,10 @@ interface UIState {
   resolved: ResolvedApproval[];
   resolveApproval: (id: string, decision: "approve" | "deny", reason?: string) => void;
   resetApprovals: () => void;
+
+  // active org context — "personal" or an org UUID
+  activeOrgId: string;
+  setActiveOrgId: (id: string) => void;
 }
 
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -80,4 +84,7 @@ export const useUI = create<UIState>((set, get) => ({
     }));
   },
   resetApprovals: () => set({ approvals: seedApprovals, resolved: [] }),
+
+  activeOrgId: "personal",
+  setActiveOrgId: (id) => set({ activeOrgId: id }),
 }));
