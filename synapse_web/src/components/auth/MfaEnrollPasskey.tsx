@@ -23,7 +23,7 @@ export function MfaEnrollPasskey({ onEnrolled, onCancel }: MfaEnrollPasskeyProps
     try {
       // Enroll a webauthn factor
       const { data, error } = await supabase.auth.mfa.enroll({
-        factorType: "webauthn" as Parameters<typeof supabase.auth.mfa.enroll>[0]["factorType"],
+        factorType: "webauthn" as const,
       });
 
       if (error) {
