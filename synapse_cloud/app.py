@@ -63,6 +63,10 @@ def create_app() -> FastAPI:
     if dist and Path(dist).is_dir():
         from fastapi.responses import FileResponse
         from fastapi.staticfiles import StaticFiles
+        from starlette.middleware.base import BaseHTTPMiddleware
+        from starlette.requests import Request as StarletteRequest
+        from starlette.responses import Response
+        from collections.abc import Callable
 
         dist_path = Path(dist)
 
@@ -70,14 +74,33 @@ def create_app() -> FastAPI:
         if (dist_path / "assets").is_dir():
             app.mount("/assets", StaticFiles(directory=dist_path / "assets"), name="web-ui-assets")
 
-        # Catch-all: serve root-level static files (favicon, manifest, …) by path,
-        # and fall back to index.html for every SPA route so Ctrl+R works on deep URLs.
+        # Catch-all for root-level static files (favicon, manifest, robots.txt, …).
         @app.get("/{full_path:path}", include_in_schema=False)
-        async def _spa_fallback(full_path: str) -> FileResponse:
+        async def _spa_static(full_path: str) -> FileResponse:
             candidate = dist_path / full_path
             if candidate.is_file():
                 return FileResponse(candidate)
             return FileResponse(dist_path / "index.html")
+
+        # SPA deep-link fix: browser page-load requests carry "text/html" in their
+        # Accept header; API calls from JS never do. Intercept browser navigations
+        # before FastAPI routing so that reloading /agents (or any SPA route) serves
+        # index.html instead of hitting the /agents API endpoint and getting a 401.
+        async def _spa_nav_handler(request: StarletteRequest, call_next: Callable) -> Response:
+            accept = request.headers.get("accept", "")
+            path = request.url.path
+            if (
+                request.method == "GET"
+                and "text/html" in accept
+                and not path.startswith("/assets/")
+            ):
+                candidate = dist_path / path.lstrip("/")
+                if candidate.is_file():
+                    return FileResponse(str(candidate))
+                return FileResponse(str(dist_path / "index.html"))
+            return await call_next(request)
+
+        app.add_middleware(BaseHTTPMiddleware, dispatch=_spa_nav_handler)
 
     return app
 
