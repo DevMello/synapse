@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scheduling &amp; Webhooks — Synapse Docs</title>
+  <link rel="stylesheet" href="../assets/styles.css" />
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="nav-inner">
+    <a href="../index.html" class="nav-logo">
+      <span class="logo-mark"></span>
+      Synapse
+    </a>
+    <div class="nav-links">
+      <a href="../docs/getting-started.html">Docs</a>
+      <a href="../docs/cli.html">CLI</a>
+      <a href="../docs/use-cases.html">Examples</a>
+      <a href="../docs/faq.html">FAQ</a>
+      <a href="#" class="btn-primary">Get Started</a>
+    </div>
+  </div>
+</nav>
+
+<div class="docs-layout">
+  <aside class="docs-sidebar">
+    <h3>Documentation</h3>
+    <nav class="sidebar-nav">
+      <a href="getting-started.html">Getting Started</a>
+      <a href="concepts.html">Concepts</a>
+      <a href="daemon.html">Daemon</a>
+      <a href="agents.html">Agents</a>
+      <a href="hitl.html">Human-in-the-Loop</a>
+      <a href="security.html">Security</a>
+      <a href="web-ui.html">Web UI</a>
+      <a href="scheduling.html">Scheduling &amp; Webhooks</a>
+      <a href="marketplace.html">Marketplace</a>
+      <a href="orchestration.html">Orchestration</a>
+      <a href="memory.html">Memory</a>
+      <a href="cli.html">CLI Reference</a>
+      <a href="use-cases.html">Use Cases</a>
+      <a href="faq.html">FAQ</a>
+    </nav>
+  </aside>
+
+  <main class="docs-content">
+    <div class="doc-hero">
+      <div class="kicker">Unit 9</div>
+      <h1>Scheduling &amp; Webhooks</h1>
+      <p>Trigger agents on a schedule, respond to external events via inbound webhooks, and push Synapse events to your own endpoints. Everything runs through the daemon — the cloud brokers but never executes.</p>
+    </div>
+
+    <!-- 1. Cron Scheduling -->
+    <section class="doc-section" id="cron">
+      <h2>Cron Scheduling</h2>
+      <p>Synapse supports standard five-field cron syntax for recurring agent runs. Schedules are stored in the cloud and dispatched to whichever daemon is online for the org at fire time.</p>
+
+      <h3>Cron syntax</h3>
+      <p>The five fields map to: <code>minute hour day-of-month month day-of-week</code>. Use <code>*</code> for "any", <code>*/n</code> for "every n", and comma-separated values for lists.</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Expression</th>
+            <th>Meaning</th>
+            <th>Typical use case</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>0 * * * *</code></td>
+            <td>Every hour, on the hour</td>
+            <td>Hourly data sync, rate-limited polling</td>
+          </tr>
+          <tr>
+            <td><code>0 2 * * *</code></td>
+            <td>Every day at 2:00 AM</td>
+            <td>Nightly reports, database backups, digest emails</td>
+          </tr>
+          <tr>
+            <td><code>0 9 * * 1-5</code></td>
+            <td>Weekdays (Mon–Fri) at 9:00 AM</td>
+            <td>Morning standup summaries, business-hours alerts</td>
+          </tr>
+          <tr>
+            <td><code>*/15 * * * *</code></td>
+            <td>Every 15 minutes</td>
+            <td>Health checks, queue consumers</td>
+          </tr>
+          <tr>
+            <td><code>0 0 1 * *</code></td>
+            <td>First day of each month at midnight</td>
+            <td>Monthly billing reports, archive jobs</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Timezone support</h3>
+      <p>Schedules default to <strong>UTC</strong>. You can set a per-schedule timezone using IANA timezone identifiers (e.g. <code>America/New_York</code>, <code>Europe/London</code>, <code>Asia/Tokyo</code>).</p>
+
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">shell</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$</span> synapse agent schedule add standup-bot \</div>
+          <div>&nbsp;&nbsp;--cron "0 9 * * 1-5" \</div>
+          <div>&nbsp;&nbsp;--timezone "America/New_York"</div>
+          <div class="term-out ok">Schedule created: standup-bot (cron: 0 9 * * 1-5, tz: America/New_York)</div>
+        </div>
+      </div>
+
+      <h3>Configure via Web UI</h3>
+      <p>Navigate to <strong>Agent → Triggers tab → Add Schedule</strong>. Enter the cron expression, select a timezone from the dropdown, and click Save. The schedule activates immediately once a daemon for your org comes online.</p>
+    </section>
+
+    <!-- 2. Interval Triggers -->
+    <section class="doc-section" id="interval">
+      <h2>Interval Triggers</h2>
+      <p>For simpler recurring patterns — every N minutes or hours — use interval triggers instead of cron. The daemon fires the agent roughly at the specified interval, measured from the last run completion (not wall-clock alignment).</p>
+
+      <h3>Specifying an interval</h3>
+      <p>Set <code>interval</code> in the agent config or via the CLI using a duration string:</p>
+      <ul>
+        <li><code>interval: "30m"</code> — every 30 minutes</li>
+        <li><code>interval: "4h"</code> — every 4 hours</li>
+        <li><code>interval: "1h30m"</code> — every 90 minutes</li>
+      </ul>
+
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">shell</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-prompt">$</span> synapse agent schedule add health-checker --interval 30m</div>
+          <div class="term-out ok">Schedule created: health-checker (interval: 30m)</div>
+          <div>&nbsp;</div>
+          <div><span class="term-prompt">$</span> synapse agent schedule add metrics-poll --interval 4h</div>
+          <div class="term-out ok">Schedule created: metrics-poll (interval: 4h)</div>
+        </div>
+      </div>
+
+      <div class="callout tip">
+        <span class="callout-icon">💡</span>
+        <p>Use interval triggers for polling agents and heartbeat checks. Use cron when runs must align to wall-clock time (e.g. "send a report every Monday at 9am").</p>
+      </div>
+    </section>
+
+    <!-- 3. Overlap Policies -->
+    <section class="doc-section" id="overlap">
+      <h2>Overlap Policies</h2>
+      <p>If the daemon fires a schedule but the agent from the previous run is still executing, the overlap policy decides what to do. Set <code>overlap</code> in the agent config or via the Triggers tab.</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Policy</th>
+            <th>Behavior</th>
+            <th>When to use</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>coalesce</code> <em>(default)</em></td>
+            <td>If a run is already active, skip the scheduled fire. The next scheduled tick will try again normally.</td>
+            <td>Most agents — prevents pile-ups when a run takes longer than the interval. Safe for idempotent jobs.</td>
+          </tr>
+          <tr>
+            <td><code>run_once</code></td>
+            <td>Enforces a global limit of one live instance at any moment. Any additional trigger (scheduled or manual) is queued and starts only after the current run finishes.</td>
+            <td>Agents that mutate shared state and must not run concurrently — e.g. a schema migration agent or a ledger reconciler.</td>
+          </tr>
+          <tr>
+            <td><code>allow</code></td>
+            <td>Always start a new run regardless of how many instances are already running. No deduplication.</td>
+            <td>Stateless fan-out agents, parallel enrichment pipelines, or any workload explicitly designed for concurrent execution.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout warning">
+        <span class="callout-icon">⚠</span>
+        <p><strong><code>allow</code> policy warning:</strong> with short intervals and slow agents, <code>allow</code> can spawn hundreds of concurrent runs. Monitor run counts in the dashboard or set a concurrency budget with <code>max_concurrency</code>.</p>
+      </div>
+    </section>
+
+    <!-- 4. Manual Triggers -->
+    <section class="doc-section" id="manual">
+      <h2>Manual Triggers</h2>
+      <p>Any agent can be triggered on demand — from the Web UI, the CLI, or via an inbound webhook. Manual runs respect the same overlap policy as scheduled runs.</p>
+
+      <h3>Web UI</h3>
+      <p>Open the agent detail page and click <strong>Run now</strong> on the <strong>Runs tab</strong>. A dialog lets you override environment variables for this specific run before confirming.</p>
+
+      <h3>CLI</h3>
+      <p>Use <code>synapse agent run &lt;name&gt;</code> to trigger a run from the terminal. Pass <code>--env KEY=val</code> one or more times to inject one-off environment variable overrides that are scoped to this single run.</p>
+
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="term-dots"><i></i><i></i><i></i></div>
+          <span class="term-file">shell</span>
+        </div>
+        <div class="term-body">
+          <div><span class="term-comment"># Trigger with a one-off env override</span></div>
+          <div><span class="term-prompt">$</span> synapse agent run pr-reviewer --env REPO=myorg/myapp</div>
+          <div class="term-out info">Queued run for pr-reviewer</div>
+          <div class="term-out">Run ID: run_01hw9yk3...</div>
+          <div class="term-out ok">Run started on daemon daemon-prod-1</div>
+          <div>&nbsp;</div>
+          <div><span class="term-comment"># Follow logs in real-time</span></div>
+          <div><span class="term-prompt">$</span> synapse run logs run_01hw9yk3 --follow</div>
+        </div>
+      </div>
+
+      <div class="callout info">
+        <span class="callout-icon">ℹ</span>
+        <p>Webhook-triggered runs are classified as <strong>manual</strong> for RBAC purposes. They are subject to the same role permissions as "Run now" clicks in the Web UI — not to scheduled-trigger permissions.</p>
+      </div>
+    </section>
+
+    <!-- 5. Inbound Webhooks -->
+    <section class="doc-section" id="inbound-webhooks">
+      <h2>Inbound Webhooks</h2>
+      <p>Each agent can be assigned one or more unique inbound webhook URLs. Any HTTP POST to that URL triggers an agent run. The request body is made available inside the run as the <code>WEBHOOK_PAYLOAD</code> environment variable (raw string, typically JSON).</p>
+
+      <h3>HMAC-SHA256 signing</h3>
+      <p>Every webhook URL includes an HMAC-SHA256 signature in the query string. Synapse validates the signature before dispatching the run. This prevents unauthorized callers from triggering your agents. The signing secret is generated by Synapse and never leaves your account.</p>
+
+      <div class="callout info">
+        <span class="callout-icon">ℹ</span>
+        <p><strong>Rotating your HMAC secret:</strong> if a webhook URL is compromised, go to <strong>Agent → Triggers → [webhook] → Rotate Secret</strong>. The old URL is immediately invalidated. Pending in-flight requests signed with the old secret will be rejected. Update any upstream callers with the new URL before rotating in production.</p>
+      </div>
+
+      <h3>Setup steps</h3>
+      <div class="steps">
+        <div class="step">
+          <div class="step-body">
+            <h4>Open the Triggers tab</h4>
+            <p>Navigate to your agent in the Web UI. Click the <strong>Triggers</strong> tab on the agent detail page.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-body">
+            <h4>Add a webhook</h4>
+            <p>Click <strong>Add Webhook</strong>. Synapse generates a unique signed URL immediately. You can optionally label the webhook (e.g. "GitHub PR events").</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-body">
+            <h4>Copy the URL</h4>
+            <p>Click the copy icon next to the URL. Paste it into your upstream service (GitHub, PagerDuty, Stripe, etc.) as the webhook destination. Configure the upstream to send POST requests.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-body">
+            <h4>Test the endpoint</h4>
+            <p>Use the <strong>Send test payload</strong> button to fire a synthetic POST. Check the Runs tab to confirm the agent started and received <code>WEBHOOK_PAYLOAD</code>.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-body">
+            <h4>Manage or revoke</h4>
+            <p>Rotate the signing secret or delete the webhook entirely from the same Triggers panel. Deletion is immediate and permanent.</p>
+          </div>
+        </div>
+      </div>
+
+      <h3>Accessing the payload</h3>
+      <p>Inside your agent process, read <code>WEBHOOK_PAYLOAD</code> from the environment:</p>
+      <pre><code>import json, os
+
+payload = json.loads(os.environ.get("WEBHOOK_PAYLOAD", "{}"))
+print("Received event:", payload.get("action"))</code></pre>
+    </section>
+
+    <!-- 6. Outbound Webhooks -->
+    <section class="doc-section" id="outbound-webhooks">
+      <h2>Outbound Webhooks</h2>
+      <p>Synapse can POST lifecycle events from your agents and organization to HTTP endpoints you control. Use this to integrate with monitoring systems, chat platforms, ticketing tools, or custom automation pipelines.</p>
+
+      <h3>Setup</h3>
+      <p>Go to <strong>Settings → Webhooks → Add Endpoint</strong>. Enter your HTTPS URL and choose which event types to subscribe to. You can add multiple endpoints, each with its own event filter.</p>
+
+      <h3>Event payload format</h3>
+      <p>All outbound events are delivered as JSON POST bodies with a consistent envelope:</p>
+      <pre><code>{
+  "event":     "run.completed",
+  "org_id":    "org_01hw...",
+  "agent_id":  "agent_01jx...",
+  "run_id":    "run_01hw9yk3...",
+  "timestamp": "2026-06-10T14:32:07Z",
+  "data": {
+    "status":        "success",
+    "duration_ms":   4821,
+    "exit_code":     0
+  }
+}</code></pre>
+
+      <p>The <code>data</code> field varies by event type — see the Event Types table below for the key fields each event carries.</p>
+
+      <h3>Request headers</h3>
+      <p>Each outbound request includes a <code>X-Synapse-Signature</code> header containing an HMAC-SHA256 signature of the raw request body, signed with your endpoint's secret. Verify this header before processing events.</p>
+    </section>
+
+    <!-- 7. Event Types -->
+    <section class="doc-section" id="event-types">
+      <h2>Event Types</h2>
+      <p>All events are available for outbound webhook subscriptions and notification routing. Subscribe selectively to keep signal-to-noise high.</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Event</th>
+            <th>Description</th>
+            <th>Key data fields</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>run.started</code></td>
+            <td>An agent run has been accepted and started on the daemon.</td>
+            <td><code>trigger</code>, <code>daemon_id</code></td>
+          </tr>
+          <tr>
+            <td><code>run.completed</code></td>
+            <td>A run finished successfully (exit code 0).</td>
+            <td><code>status</code>, <code>duration_ms</code>, <code>exit_code</code></td>
+          </tr>
+          <tr>
+            <td><code>run.failed</code></td>
+            <td>A run exited with a non-zero code or was killed.</td>
+            <td><code>exit_code</code>, <code>error_message</code>, <code>duration_ms</code></td>
+          </tr>
+          <tr>
+            <td><code>approval.requested</code></td>
+            <td>An agent hit a human-in-the-loop checkpoint and is awaiting approval.</td>
+            <td><code>checkpoint_id</code>, <code>prompt</code>, <code>timeout_at</code></td>
+          </tr>
+          <tr>
+            <td><code>approval.resolved</code></td>
+            <td>An approval checkpoint was approved or denied.</td>
+            <td><code>checkpoint_id</code>, <code>decision</code>, <code>resolved_by</code></td>
+          </tr>
+          <tr>
+            <td><code>alert.fired</code></td>
+            <td>An agent-defined alert condition was triggered (e.g. error rate threshold).</td>
+            <td><code>alert_name</code>, <code>severity</code>, <code>value</code>, <code>threshold</code></td>
+          </tr>
+          <tr>
+            <td><code>budget.exceeded</code></td>
+            <td>An agent or org has exceeded a configured cost or token budget.</td>
+            <td><code>budget_type</code>, <code>limit</code>, <code>actual</code>, <code>period</code></td>
+          </tr>
+          <tr>
+            <td><code>daemon.offline</code></td>
+            <td>A daemon lost its heartbeat connection to the cloud broker.</td>
+            <td><code>daemon_id</code>, <code>last_seen_at</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 8. Notification Routing -->
+    <section class="doc-section" id="notifications">
+      <h2>Notification Routing</h2>
+      <p>Notification channels let you route events to Slack, Discord, or Email without writing custom webhook handlers. Configure channels in <strong>Settings → Notifications</strong>, then define rules that map event types and severity levels to those channels.</p>
+
+      <h3>Channel setup</h3>
+      <p>Go to <strong>Settings → Notifications → Add Channel</strong>. Supported channel types:</p>
+      <ul>
+        <li><strong>Slack</strong> — paste a Slack incoming webhook URL and optionally pin to a channel.</li>
+        <li><strong>Discord</strong> — paste a Discord webhook URL from Server Settings → Integrations.</li>
+        <li><strong>Email</strong> — enter one or more recipient addresses; Synapse sends via its transactional mail provider.</li>
+      </ul>
+
+      <h3>Routing rules</h3>
+      <p>Rules are evaluated top-to-bottom. Each rule specifies the event types it matches, a minimum severity level, and the target channel. Example configuration (shown in YAML-like notation for readability):</p>
+
+      <pre><code>notification_rules:
+  - name: "Critical failures to Slack ops"
+    events: [run.failed, daemon.offline, budget.exceeded]
+    severity: critical
+    channel: slack-ops-alerts
+
+  - name: "All run events to email digest"
+    events: [run.started, run.completed, run.failed]
+    severity: info
+    channel: email-team-digest
+
+  - name: "Approvals to Discord"
+    events: [approval.requested, approval.resolved]
+    severity: info
+    channel: discord-approvals
+
+  - name: "Budget warnings to Slack"
+    events: [budget.exceeded, alert.fired]
+    severity: warning
+    channel: slack-cost-alerts</code></pre>
+
+      <div class="callout tip">
+        <span class="callout-icon">💡</span>
+        <p>Keep critical-severity rules at the top. If multiple rules match an event, all matching channels receive the notification — there is no short-circuit.</p>
+      </div>
+    </section>
+
+    <!-- 9. Delivery Reliability -->
+    <section class="doc-section" id="delivery">
+      <h2>Delivery Reliability</h2>
+      <p>Synapse retries failed outbound webhook deliveries automatically. A delivery is considered failed if the endpoint returns a non-2xx HTTP status code or does not respond within 10 seconds.</p>
+
+      <h3>Retry schedule</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Attempt</th>
+            <th>Delay after previous attempt</th>
+            <th>Cumulative time elapsed</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1 (initial)</td>
+            <td>—</td>
+            <td>0s</td>
+          </tr>
+          <tr>
+            <td>2</td>
+            <td>30 seconds</td>
+            <td>~30s</td>
+          </tr>
+          <tr>
+            <td>3</td>
+            <td>2 minutes</td>
+            <td>~2m 30s</td>
+          </tr>
+          <tr>
+            <td>4</td>
+            <td>10 minutes</td>
+            <td>~12m 30s</td>
+          </tr>
+          <tr>
+            <td>5 (final)</td>
+            <td>30 minutes</td>
+            <td>~42m 30s</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>After five failed attempts the event is marked <strong>dead</strong>. No further retries are made. You can manually replay dead events from the delivery log.</p>
+
+      <h3>Delivery log</h3>
+      <p>Every delivery attempt — successful or failed — is recorded. To inspect it: go to <strong>Settings → Webhooks → [your endpoint] → Delivery Log</strong>. Each entry shows the event type, HTTP status code returned, response time, and retry count.</p>
+
+      <div class="callout info">
+        <span class="callout-icon">ℹ</span>
+        <p>Delivery logs are retained for 30 days. Use the <strong>Replay</strong> button on any entry to re-send a specific event to your endpoint, regardless of its original delivery status.</p>
+      </div>
+
+      <h3>Idempotency</h3>
+      <p>Because events can be delivered more than once (on retries), your endpoint should handle duplicate deliveries gracefully. Use the <code>run_id</code> or <code>checkpoint_id</code> from the event payload as an idempotency key when writing to databases or triggering downstream actions.</p>
+    </section>
+
+  </main>
+</div>
+
+<footer class="site-footer">
+  <p>&copy; 2026 Synapse. Built for humans who trust machines — carefully. &nbsp;·&nbsp; <a href="../docs/getting-started.html">Docs</a> &nbsp;·&nbsp; <a href="../docs/faq.html">FAQ</a></p>
+</footer>
+
+<script src="../assets/main.js"></script>
+</body>
+</html>
