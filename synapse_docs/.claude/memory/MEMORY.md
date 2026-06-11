@@ -1,0 +1,1 @@
+- [Search Command Implementation](search_command_implementation.md) — CTRL+K search feature for docs pages
