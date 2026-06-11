@@ -1,8 +1,399 @@
-import fs from 'fs'
-import path from 'path'
+import { CapabilityMock } from '@/components/capabilities/data'
 
-export default function Memory() {
-  const filePath = path.join(process.cwd(), 'public', 'docs_html', 'docs', 'memory.html')
-  const html = fs.readFileSync(filePath, 'utf8')
-  return <article className="legacy-html" dangerouslySetInnerHTML={{ __html: html }} />
+export default function Page() {
+  return <>
+
+
+
+    <div className="doc-hero">
+      <div className="kicker">Agent Intelligence</div>
+      <h1>Memory System</h1>
+      <p>Give your agents durable, queryable memory that survives restarts, syncs across daemons, and never exposes raw data to the cloud.</p>
+    </div>
+
+    <CapabilityMock id="memory" />
+
+    <section className="doc-section" id="overview">
+      <h2>Overview</h2>
+      <p>
+        Every agent running on a Synapse daemon gets its own isolated, persistent memory store.
+        By default the store is a local <strong>SQLite</strong> database; opt in to
+        <strong>Chroma</strong> for semantic vector search on top.
+      </p>
+      <p>
+        Memory survives daemon restarts and process crashes. After each run completes the daemon
+        automatically syncs the agent's memory to the Synapse cloud as
+        <strong>end-to-end-encrypted blobs</strong> — the same recovery key used for checkpoint
+        encryption protects memory blobs. Any other authorized daemon can restore the snapshot,
+        making memory portable across machines.
+      </p>
+      <p>
+        Before any data leaves the daemon, the <strong>redaction pipeline</strong> (shared with
+        run telemetry) strips PII and secrets. The cloud stores only opaque ciphertext; it never
+        executes agents or holds raw key material.
+      </p>
+      <ul>
+        <li>Storage: SQLite KV store (+ optional Chroma vector index) on the daemon</li>
+        <li>Sync: automatic after each run; manual via CLI</li>
+        <li>Encryption: E2E to org recovery key before leaving the daemon</li>
+        <li>Redaction: PII/secret scrubbing before every sync</li>
+        <li>Quota: 50 MB KV + 500 MB vector per agent (configurable)</li>
+      </ul>
+    </section>
+
+    
+    <section className="doc-section" id="kv-store">
+      <h2>Key-Value Store</h2>
+      <p>
+        The KV store is the primary memory API. Each entry is a structured record with the
+        following fields:
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Field</th>
+            <th>Type</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>namespace</code></td>
+            <td><code>string</code></td>
+            <td>Logical grouping for entries. Examples: <code>context</code>, <code>user-prefs</code>, <code>session</code>. Namespaces are created on first write.</td>
+          </tr>
+          <tr>
+            <td><code>key</code></td>
+            <td><code>string</code></td>
+            <td>Identifier within the namespace. Must be unique per namespace.</td>
+          </tr>
+          <tr>
+            <td><code>value</code></td>
+            <td><code>any</code></td>
+            <td>Any JSON-serializable value: string, number, boolean, object, or array.</td>
+          </tr>
+          <tr>
+            <td><code>tags</code></td>
+            <td><code>string[]</code></td>
+            <td>Optional list of tag strings for filtering and search. Tags are indexed.</td>
+          </tr>
+          <tr>
+            <td><code>ttl</code></td>
+            <td><code>duration | null</code></td>
+            <td>Optional time-to-live. Entry is automatically deleted after this duration. Accepts ISO 8601 durations (e.g. <code>PT1H</code>) or seconds integer.</td>
+          </tr>
+          <tr>
+            <td><code>size_bytes</code></td>
+            <td><code>int</code></td>
+            <td>Byte size of the serialized value. Tracked automatically for quota enforcement; read-only.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    
+    <section className="doc-section" id="memory-api">
+      <h2>Memory API</h2>
+      <p>
+        Agents interact with memory through the <code>memory</code> object injected into every
+        run context. Each call is an MCP tool invocation under the hood, so it is auditable in
+        the memory journal and visible in the Web UI.
+      </p>
+
+      <h3>Set a value</h3>
+      <pre><code>{"# Set a value\nmemory.set(\"context\", \"last-pr-reviewed\", {\"number\": 42, \"status\": \"approved\"}, tags=[\"pr\"])"}</code></pre>
+
+      <h3>Get a value</h3>
+      <pre><code># Get a value
+val = memory.get("context", "last-pr-reviewed")</code></pre>
+
+      <h3>Search by tag</h3>
+      <pre><code># Search by tag
+results = memory.search(tags=["pr"], namespace="context")</code></pre>
+
+      <h3>Delete an entry</h3>
+      <pre><code># Delete
+memory.delete("context", "last-pr-reviewed")</code></pre>
+
+      <h3>List a namespace</h3>
+      <pre><code># List namespace
+entries = memory.list("context", limit=50)</code></pre>
+
+      <p>
+        All five operations are synchronous from the agent's perspective. The daemon handles
+        SQLite I/O and journal writes in a background thread without blocking the agent run.
+      </p>
+    </section>
+
+    
+    <section className="doc-section" id="journal">
+      <h2>Memory Journal</h2>
+      <p>
+        Every memory operation is appended to an <strong>append-only write-ahead log</strong>
+        stored in SQLite alongside the KV store. The journal is the authoritative record of all
+        mutations and is used during cloud restore to resolve conflicts when two daemons have
+        diverged.
+      </p>
+      <p>Each journal entry contains:</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Field</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>operation</code></td>
+            <td><code>set</code> or <code>delete</code></td>
+          </tr>
+          <tr>
+            <td><code>namespace</code></td>
+            <td>Namespace of the affected entry</td>
+          </tr>
+          <tr>
+            <td><code>key</code></td>
+            <td>Key of the affected entry</td>
+          </tr>
+          <tr>
+            <td><code>timestamp</code></td>
+            <td>ISO 8601 UTC timestamp of the operation</td>
+          </tr>
+          <tr>
+            <td><code>run_id</code></td>
+            <td>ID of the agent run that triggered the operation; <code>null</code> for manual edits via Web UI or CLI</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        The journal is visible in the Web UI under <strong>Agent → Memory → Journal tab</strong>.
+        Entries are immutable; the journal grows indefinitely by design. Old entries are compacted
+        (not deleted) when a cloud sync checkpoint is created.
+      </p>
+    </section>
+
+    
+    <section className="doc-section" id="cloud-sync">
+      <h2>Cloud Sync</h2>
+      <p>
+        Memory sync happens automatically after each agent run completes. The daemon packages the
+        current KV snapshot plus the journal delta since the last sync, encrypts the bundle with
+        the org recovery key (the same key used for run checkpoint encryption), and uploads the
+        opaque blob to the Synapse cloud.
+      </p>
+      <p>
+        The cloud stores the blob but cannot read it — it is a transparent relay. Any daemon
+        that holds the org recovery key can pull and decrypt the blob to restore an agent's
+        memory on a new machine.
+      </p>
+      <p>
+        Sync status is visible in the Web UI under <strong>Agent → Memory → Sync tab</strong>,
+        showing the last sync time, blob size, and any pending local changes.
+      </p>
+      <p>To trigger a manual sync:</p>
+
+      <div className="terminal">
+        <div className="term-bar">
+          <div className="term-dots"><i></i><i></i><i></i></div>
+          <span className="term-file">terminal</span>
+        </div>
+        <div className="term-body">
+          <div><span className="term-prompt">$ </span>synapse agent memory sync pr-reviewer</div>
+          <div className="term-out ok">Syncing memory for agent "pr-reviewer"...</div>
+          <div className="term-out ok">KV snapshot: 128 entries (42 KB)</div>
+          <div className="term-out ok">Journal delta: 17 new entries</div>
+          <div className="term-out ok">Encrypted and uploaded in 340 ms</div>
+        </div>
+      </div>
+    </section>
+
+    
+    <section className="doc-section" id="redaction">
+      <h2>Redaction Before Sync</h2>
+      <p>
+        The same PII and secret redaction pipeline used for run telemetry runs on all memory
+        values before they leave the daemon. Redaction applies to both KV values and the
+        write-ahead journal entries.
+      </p>
+
+      <div className="callout info">
+        <span className="callout-icon">ℹ</span>
+        <p>
+          Redacted tokens appear as <code>{"<REDACTED:TYPE:hash>"}</code> in cloud blobs —
+          for example, <code>{"<REDACTED:EMAIL:a3f2c1>"}</code> or
+          <code>{"<REDACTED:API_KEY:9e7d04>"}</code>. The daemon stores a local mapping from
+          hash to original value so the agent can transparently reconstruct the value on read.
+          The cloud <strong>never</strong> sees raw memory contents.
+        </p>
+      </div>
+
+      <p>Redaction covers:</p>
+      <ul>
+        <li>Email addresses, phone numbers, and other PII patterns</li>
+        <li>API keys, tokens, and secrets matching the daemon's secret-detection rules</li>
+        <li>Any value that matches a custom redaction pattern configured in <code>daemon.toml</code></li>
+      </ul>
+      <p>
+        Redaction is one-way for the cloud: even if someone obtained the encrypted blob and the
+        recovery key, they would see only hashed placeholders for sensitive tokens rather than
+        raw values.
+      </p>
+    </section>
+
+    
+    <section className="doc-section" id="web-ui">
+      <h2>Viewing and Editing Memory in Web UI</h2>
+      <p>
+        Navigate to <strong>Web UI → Agent → Memory</strong> to inspect and manage an agent's
+        memory store without writing code or using the CLI.
+      </p>
+      <p>The Memory tab has three sub-tabs:</p>
+
+      <h3>Browser tab</h3>
+      <ul>
+        <li><strong>Left sidebar</strong> — namespace browser listing all namespaces with entry counts and total size</li>
+        <li><strong>Main area</strong> — key-value table for the selected namespace; columns: key, value preview, tags, TTL, size, last modified</li>
+        <li><strong>Tag filter</strong> — filter entries by one or more tags</li>
+        <li><strong>Key prefix search</strong> — live search by key prefix within the selected namespace</li>
+        <li><strong>JSON editor</strong> — click any row to open the full value in a syntax-highlighted editor; save changes directly</li>
+        <li><strong>Delete</strong> — delete individual entries, bulk-delete by namespace, or bulk-delete by tag</li>
+        <li><strong>Quota bar</strong> — shows current KV usage vs the agent's quota limit</li>
+      </ul>
+
+      <h3>Journal tab</h3>
+      <p>Append-only log of all memory operations with operation type, key, timestamp, and run ID. Filterable by operation type, namespace, and date range.</p>
+
+      <h3>Sync tab</h3>
+      <p>Shows last sync timestamp, encrypted blob size, pending local changes since last sync, and a <strong>Sync now</strong> button.</p>
+    </section>
+
+    
+    <section className="doc-section" id="snapshots">
+      <h2>Pre-loading Memory Snapshots</h2>
+      <p>
+        Admins can export a full memory snapshot to JSON and import it into any agent — useful
+        for migrating an agent between organizations, seeding context before a first run, or
+        creating a checkpoint before a major change.
+      </p>
+
+      <h3>Export</h3>
+
+      <div className="terminal">
+        <div className="term-bar">
+          <div className="term-dots"><i></i><i></i><i></i></div>
+          <span className="term-file">terminal</span>
+        </div>
+        <div className="term-body">
+          <div><span className="term-comment"># Export all namespaces to a JSON file</span></div>
+          <div><span className="term-prompt">$ </span>{"synapse agent memory export pr-reviewer > memory.json"}</div>
+          <div className="term-out ok">Exported 3 namespaces, 247 entries (89 KB) to memory.json</div>
+        </div>
+      </div>
+
+      <h3>Import</h3>
+
+      <div className="terminal">
+        <div className="term-bar">
+          <div className="term-dots"><i></i><i></i><i></i></div>
+          <span className="term-file">terminal</span>
+        </div>
+        <div className="term-body">
+          <div><span className="term-comment"># Import a snapshot into a new agent</span></div>
+          <div><span className="term-prompt">$ </span>synapse agent memory import pr-reviewer-v2 memory.json</div>
+          <div className="term-out ok">Importing 3 namespaces, 247 entries...</div>
+          <div className="term-out ok">Import complete. Memory synced to cloud.</div>
+        </div>
+      </div>
+
+      <p>
+        The import command merges the snapshot with any existing memory using last-write-wins
+        semantics. Existing entries not present in the snapshot are preserved. Pass
+        <code>--replace</code> to wipe all existing memory before importing.
+      </p>
+    </section>
+
+    
+    <section className="doc-section" id="vector">
+      <h2>Vector Backend (Chroma)</h2>
+      <p>
+        The optional vector backend enables semantic (similarity) search over memory values.
+        It is implemented with <strong>Chroma DB</strong> running locally on the daemon.
+      </p>
+
+      <h3>Installation</h3>
+      <pre><code>pip install "synapse-worker[vector]"</code></pre>
+
+      <h3>Configuration</h3>
+      <p>Add the following to your <code>daemon.toml</code>:</p>
+      <pre><code>[memory]
+vector_backend = "chroma"
+chroma_path    = "~/.synapse/chroma"</code></pre>
+
+      <h3>Semantic search</h3>
+      <pre><code>results = memory.semantic_search(
+    "what PRs did I review last week?",
+    namespace="context",
+    top_k=5
+)</code></pre>
+
+      <p>
+        Semantic search returns entries ranked by cosine similarity to the query embedding.
+        Each result includes the entry's key, value, tags, and a <code>score</code> float
+        between 0 and 1.
+      </p>
+      <p>
+        The Chroma index is included in cloud sync alongside the KV snapshot — both are
+        encrypted to the org recovery key before upload. Restoring memory on a new daemon
+        restores the vector index as well, so semantic search is available immediately after
+        restore without re-indexing.
+      </p>
+    </section>
+
+    
+    <section className="doc-section" id="quotas">
+      <h2>Quotas</h2>
+      <p>
+        Each agent has an independent memory quota enforced by the daemon. Default limits:
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Store</th>
+            <th>Default limit</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>KV store (<code>size_bytes</code> sum)</td>
+            <td>50 MB</td>
+          </tr>
+          <tr>
+            <td>Vector index (Chroma)</td>
+            <td>500 MB</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        When an agent exceeds its quota, new <code>memory.set()</code> calls raise a
+        <code>MemoryQuotaError</code>. Existing entries are not affected and reads continue
+        to work normally.
+      </p>
+      <p>
+        Quota limits are configurable per agent in <strong>Web UI → Agent → Settings →
+        Memory</strong>. The current usage vs limit is shown as a quota bar in the Memory
+        Browser tab.
+      </p>
+
+      <div className="callout tip">
+        <span className="callout-icon">✓</span>
+        <p>
+          Use <code>ttl</code> on entries that are only relevant for a limited window — for
+          example, session context or per-run state. Automatic expiry keeps quota usage low
+          without requiring explicit cleanup logic in your agent code.
+        </p>
+      </div>
+    </section>
+
+  
+  </>
 }

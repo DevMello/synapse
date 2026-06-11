@@ -3,6 +3,8 @@ import { Inter, Instrument_Serif, JetBrains_Mono } from 'next/font/google'
 import './globals.css'
 import Nav from '@/components/Nav'
 import Footer from '@/components/Footer'
+import SmoothScroll from '@/components/fx/SmoothScroll'
+import Cursor from '@/components/fx/Cursor'
 
 const inter = Inter({
   subsets: ['latin'],
@@ -38,9 +40,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${inter.variable} ${instrumentSerif.variable} ${jetbrainsMono.variable}`}
     >
       <body>
-        <Nav />
-        {children}
-        <Footer />
+        <SmoothScroll>
+          <Cursor />
+          <Nav />
+          <main className="page-main">{children}</main>
+          <Footer />
+        </SmoothScroll>
       </body>
     </html>
   )
