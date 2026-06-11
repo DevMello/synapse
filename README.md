@@ -2,10 +2,9 @@
 
 **An agent-manager platform with a hard trust boundary: your machine executes agents and holds the secrets; the cloud is only a broker and historian.**
 
-Synapse lets you deploy, run, and observe AI agents (both API models and CLI tools like
-Claude Code, Codex, and Gemini CLI) on your own machines, while managing them from a web
-control surface. Execution, raw provider keys, and PII redaction never leave the host the
-agent runs on — the cloud brokers commands and stores only redacted/encrypted records.
+Synapse is a **four-part system**: a Python daemon that runs agents on your machines with on-device security enforcement, a cloud broker that manages auth and audit, a web control surface for monitoring and deployment, and a modern documentation site with landing page.
+
+Execution, raw provider keys, and PII redaction never leave the host the agent runs on — the cloud brokers commands and stores only redacted/encrypted records.
 
 ---
 
@@ -23,83 +22,125 @@ routing, audit, analytics); your machine is the *data plane* (execution, secrets
 
 ---
 
-## The three products
+## The four products
 
-| Product | Package | What it is |
-|---------|---------|------------|
-| **TUI Worker Daemon** | `synapse_worker/` (`synapse-worker` on PyPI, `synapse` CLI) | Python daemon installed on your machines. Executes agents, redacts PII/secrets **on-device**, enforces rulesets/blockers/guardrails, handles HITL pauses, checkpoints long runs, and connects to the cloud over an **outbound-only WebSocket uplink**. Ships a Typer CLI and a Textual TUI. |
-| **Cloud Backend** | `synapse_cloud/` (`synapse-cloud`) | FastAPI broker/historian. ~60 REST endpoints + a WebSocket daemon hub, backed by **Supabase** (Postgres + RLS, Auth, Storage, Realtime) with **Arq/Redis** async workers for telemetry rollups, heartbeat monitoring, anomaly detection, webhooks, and notifications. |
-| **Web UI** | _specified in [`docs/web-ui.md`](docs/web-ui.md); served as a static bundle by the Cloud Backend_ | React/TS control surface: one-click deploy, Markdown prompt editor with versioning/diff/rollback, live trace viewer, analytics, approvals queue, marketplaces. |
+| Product | Directory | What it is |
+|---------|-----------|------------|
+| **TUI Worker Daemon** | `synapse_worker/` | Python daemon for your machines. Executes agents, redacts PII/secrets **on-device**, enforces rulesets/blockers/guardrails, handles HITL pauses, checkpoints long runs, and connects to the cloud over an **outbound-only WebSocket uplink**. Ships a Typer CLI and optional Textual TUI. Published as `synapse` CLI. |
+| **Cloud Backend** | `synapse_cloud/` | FastAPI broker/historian with ~60 REST endpoints + WebSocket daemon hub. Backed by **Supabase** (Postgres + RLS, Auth, Storage, Realtime) with in-process async workers for telemetry rollups, heartbeat monitoring, anomaly detection, webhooks, and notifications. |
+| **Web UI** | `synapse_web/` | React/TypeScript SPA (Vite) control surface. One-click deploy, Markdown prompt editor with versioning/diff/rollback, live trace viewer, token + cost analytics, approvals queue, and marketplace. Serves as a static bundle from the Cloud Backend (same origin). |
+| **Documentation Site** | `synapse_docs/` | Next.js 15 documentation and landing page. Modern, searchable docs site (`/docs`) with global CTRL+K search, integrated with the legacy spec docs. Serves the public-facing product story. |
 
-The Web UI bundle and the Cloud Backend are deployed on the **same host** (one origin, no
-CORS); Supabase and the daemons run separately.
+The Web UI and Cloud Backend are deployed on the **same host** (one origin, no CORS);
+Supabase and the daemons run separately.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────┐        Supabase Realtime (WSS)        ┌──────────────────────────┐
-│   Web UI    │ ◄───────────────────────────────────► │      Cloud Backend       │
-│  (browser)  │            REST (same origin)          │  FastAPI + WS daemon hub │
-└─────────────┘ ─────────────────────────────────────►│  Supabase · Arq/Redis    │
-                                                       └────────────▲─────────────┘
+┌──────────────────────────┐  Supabase Realtime (WSS)  ┌─────────────────────────┐
+│   Web UI (synapse_web)   │ ◄──────────────────────► │   Cloud Backend         │
+│   React SPA (Vite)       │      REST (same origin)   │   FastAPI + WS hub      │
+│                          │ ────────────────────────► │   Supabase · Async jobs │
+└──────────────────────────┘                           └────────────▲────────────┘
                                                                     │ outbound-only
                                                        WebSocket uplink (daemon-initiated):
-                                                         • control + HITL  (cloud→daemon
-                                                           commands need no inbound port)
+                                                         • control + HITL
                                                          • telemetry firehose
                                                                     │
-                                                       ┌────────────┴─────────────┐
-                                                       │     TUI Worker Daemon    │
-                                                       │  agent runtime · redaction│
-                                                       │  ruleset · vault · SQLite │
-                                                       │  (your machine)          │
-                                                       └──────────────────────────┘
+                                                       ┌────────────┴────────────┐
+                                                       │  TUI Worker Daemon      │
+                                                       │  (synapse_worker/)      │
+                                                       │  • agent runtime        │
+                                                       │  • PII/secret redaction │
+                                                       │  • ruleset enforcement  │
+                                                       │  • checkpoint WAL       │
+                                                       │  (your machine)         │
+                                                       └─────────────────────────┘
+
+┌──────────────────────────┐
+│  Documentation Site      │
+│  (synapse_docs/)         │
+│  Next.js 15 + Landing    │
+│  CTRL+K Search           │
+│  (public-facing)         │
+└──────────────────────────┘
 ```
 
-- **Daemon auth**: custom **OAuth 2.0 Device Authorization Grant** (RFC 8628) — `synapse
-  login` shows a `user_code`, you approve it in the already-authenticated Web UI; no
-  password is ever typed in the terminal. Per-device tokens are revocable.
-- **Secrets**: agent env-var values are **E2E-encrypted** (X25519/libsodium sealed box via
-  PyNaCl) — the daemon holds the private key, the browser encrypts to its public key, and
-  the cloud relays opaque ciphertext + stores var *names* only.
-- **Checkpoints**: long runs are journaled to a local SQLite WAL and synced to the cloud
-  **E2E-encrypted to an org recovery key**, so any authorized daemon can resume after total
-  local loss.
-- **Guardrails**: on-device input/output filtering (PII/secret redaction + prompt-injection
-  guard) and a Ruleset Engine (command blockers, write-path guards, host allow-lists,
-  cost/tool caps) — all **enforced by the daemon, not the model**.
+### Key mechanisms
+
+- **Daemon auth**: RFC 8628 device-code grant — `synapse login` shows an 8-char code you approve in the Web UI; no terminal passwords.
+- **Secrets**: Agent env-vars are **X25519 sealed-box encrypted** in the browser before transmission. The daemon holds the private key; the cloud relays opaque ciphertext + stores var names only.
+- **Checkpoints**: Long runs journal to a local SQLite WAL and sync to the cloud **E2E-encrypted to an org recovery key**, so any authorized daemon can resume after total loss.
+- **Guardrails**: On-device input/output filtering (PII/secret redaction + prompt-injection guard) and a Ruleset Engine (command blockers, write-path guards, host allow-lists, cost/tool caps) — all **enforced by the daemon, not the model**.
 
 ---
 
 ## Repository layout
 
 ```
-synapse/
-├── docs/                     # Product design specs (source of truth for behavior)
-│   ├── tui-daemon.md         #   the worker daemon
-│   ├── cloud-backend.md      #   the cloud broker/historian
-│   ├── web-ui.md             #   the web control surface
-│   ├── integration.md        #   how the three fit together + the invariants
-│   └── possible-features.md  #   experimental, off-by-default feature designs
-├── synapse_cloud/            # Cloud Backend (FastAPI)
-│   ├── app.py                #   application factory (routers auto-discovered)
-│   ├── routers/              #   REST endpoints (agents, runs, auth_device, hitl, …)
-│   ├── ws_hub/               #   WebSocket daemon hub
-│   ├── workers/              #   Arq async tasks (rollups, anomaly, heartbeat, …)
-│   └── services/             #   memory sync, recovery, telemetry ingest, tokens, …
-├── synapse_worker/           # TUI Worker Daemon (Typer CLI + Textual TUI)
-│   ├── cli/                  #   `synapse` subcommands (login, daemon, agent, env, …)
-│   ├── commands/             #   cloud→daemon command handlers (auto-discovered)
-│   ├── runtime/              #   API + CLI agent adapters, ccusage cost accounting
-│   ├── connection/           #   the outbound WebSocket uplink
-│   ├── filtering/ ruleset/   #   redaction + injection guard + ruleset enforcement
-│   ├── checkpoint/ vault/    #   durable execution + the E2E env-var vault
-│   └── tui/                  #   Textual panes (agents, approvals, live, logs)
-└── tools/
-    ├── supabase/migrations/  # 9 SQL migrations (schema, RLS, partitioned telemetry)
-    └── tests/                # cloud tests + self-contained tests/worker/ suite
+synapse/                             # Monorepo: daemon, cloud, web UI, docs
+├── synapse_worker/                  # TUI Worker Daemon (Python · Typer/Textual)
+│   ├── cli/                         #   `synapse` subcommands
+│   ├── commands/                    #   cloud→daemon command handlers
+│   ├── runtime/                     #   agent adapters + cost accounting
+│   ├── connection/                  #   WebSocket uplink
+│   ├── filtering/                   #   redaction + injection guard
+│   ├── ruleset/                     #   guardrail enforcement
+│   ├── checkpoint/                  #   durable execution + recovery
+│   ├── vault/                       #   E2E env-var encryption
+│   ├── orchestrator/                #   agent workflow composition
+│   ├── scheduler/                   #   cron + task scheduling
+│   ├── memory/                      #   agent memory systems
+│   ├── plugins/                     #   extensibility
+│   ├── hitl/                        #   human-in-the-loop
+│   └── tui/                         #   Textual dashboard
+│
+├── synapse_cloud/                   # Cloud Backend (Python · FastAPI)
+│   ├── app.py                       #   application factory
+│   ├── routers/                     #   REST endpoints (agents, runs, auth, hitl, …)
+│   ├── ws_hub/                      #   WebSocket daemon hub
+│   ├── workers/                     #   async jobs (rollups, anomaly, heartbeat)
+│   ├── services/                    #   memory sync, recovery, telemetry, tokens
+│   ├── notifications/               #   webhooks + alerts
+│   └── command_auth.py              #   command authorization
+│
+├── synapse_web/                     # Web UI (React + TypeScript · Vite)
+│   ├── src/
+│   │   ├── screens/                 #   pages (agents, runs, settings, …)
+│   │   ├── components/              #   UI primitives + common widgets
+│   │   ├── api/                     #   TanStack Query hooks → REST
+│   │   ├── store/                   #   Zustand state (UI, toasts, approvals)
+│   │   ├── styles/                  #   design system CSS + Tailwind
+│   │   └── lib/                     #   Supabase client, utilities
+│   └── dist/                        #   built bundle (served by cloud backend)
+│
+├── synapse_docs/                    # Documentation Site (Next.js 15)
+│   ├── app/
+│   │   ├── page.tsx                 #   landing page
+│   │   ├── docs/                    #   documentation pages
+│   │   └── layout.tsx               #   root layout
+│   ├── components/                  #   SearchCommand, Nav, Footer, etc.
+│   ├── lib/docs.ts                  #   docs metadata + search index
+│   ├── public/docs_html/            #   legacy HTML docs (embedded)
+│   └── globals.css                  #   site styles + search modal
+│
+├── docs/                            # Product design specs (source of truth)
+│   ├── tui-daemon.md                #   daemon behavior + design
+│   ├── cloud-backend.md             #   broker/historian spec
+│   ├── web-ui.md                    #   UI spec + screens
+│   ├── integration.md               #   how components fit + invariants
+│   ├── possible-features.md         #   experimental designs (orchestration, etc.)
+│   └── tasks/                       #   implementation task docs
+│
+├── tools/
+│   ├── supabase/migrations/         #   SQL migrations (schema, RLS, telemetry)
+│   └── tests/                       #   integration + worker tests
+│
+├── pyproject.toml                   #   Python project config (cloud + worker)
+├── .env.example                     #   env vars for cloud setup
+└── README.md                        #   this file
 ```
 
 ---
@@ -108,28 +149,27 @@ synapse/
 
 ### Prerequisites
 
-- **Python 3.10+** (the worker targets 3.11+).
-- A **Supabase** project (the schema lives in `tools/supabase/migrations/`).
-- [`uv`](https://github.com/astral-sh/uv) recommended for installs.
+- **Python 3.10+** (worker daemon targets 3.11+).
+- **Node.js 18+** (for web UI and docs site).
+- A **Supabase** project (schema lives in `tools/supabase/migrations/`).
+- [`uv`](https://github.com/astral-sh/uv) recommended for Python.
 
-> Background jobs (heartbeat sweep, telemetry rollups, anomaly detection, notifications)
-> run **in-process** via the app lifespan scheduler — no Redis, no separate worker process.
+> Background jobs (heartbeat sweep, telemetry rollups, anomaly detection) run **in-process** via the app lifespan scheduler — no Redis, no separate worker process.
 
-### 1. Install
+### Option A: Local Full-Stack Setup
+
+#### 1. Install & configure the cloud backend
 
 ```bash
-# Cloud Backend (+ dev/test deps)
+# Install cloud deps (+ dev/test)
 pip install -e ".[dev]"
 
-# Worker daemon (+ dev deps). Optional extras: [redaction] (Presidio), [vector] (Chroma)
+# Install worker daemon deps (+ dev)
 uv pip install -e ".[worker,dev]"
-```
 
-### 2. Configure the cloud
-
-```bash
+# Configure
 cp .env.example .env
-# Fill in SUPABASE_SERVICE_ROLE_KEY and set a real DAEMON_JWT_SECRET.
+# Edit .env: add SUPABASE_SERVICE_ROLE_KEY, set DAEMON_JWT_SECRET
 ```
 
 Key environment variables (see `.env.example`):
@@ -138,86 +178,119 @@ Key environment variables (see `.env.example`):
 |-----|---------|
 | `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` | Supabase project + keys |
 | `DAEMON_JWT_SECRET` | signs daemon device-code access tokens (HS256) |
-| `GRANT_SIGNING_KEY` | ed25519 seed for signing agent-orchestration grants (daemon verifies with the matching public key) |
-| `SYNAPSE_ENV` | `dev` / `test` (`test` fakes outbound side-effects) |
-| `WEB_UI_DIST` | path to a built Web UI bundle to serve from the same origin |
+| `GRANT_SIGNING_KEY` | ed25519 seed for orchestration grants |
+| `SYNAPSE_ENV` | `dev` / `test` (test fakes side-effects) |
+| `WEB_UI_DIST` | path to built Web UI bundle (e.g., `synapse_web/dist`) |
 
-### 3. Run the Cloud Backend
-
-```bash
-# Web app + WebSocket daemon hub + in-process periodic scheduler — one process, no Redis.
-uvicorn synapse_cloud.app:create_app --factory --reload
-```
-
-### 4. Run a worker daemon
+#### 2. Build the web UI
 
 ```bash
-synapse login            # device-code flow — approve in the Web UI, no password in the terminal
-synapse daemon run       # run in the foreground (or `synapse daemon install` for a native service)
-synapse tui              # optional Textual dashboard
+cd synapse_web
+npm install
+npm run build    # outputs to dist/
+cd ..
 ```
 
-Other CLI groups: `synapse agent …`, `synapse env …`, `synapse plugin …`, `synapse init`,
-`synapse --version`.
+#### 3. Run the cloud backend
+
+```bash
+# Serves Web UI + REST API + WebSocket daemon hub
+uvicorn synapse_cloud.app:create_app --factory --reload --host 0.0.0.0 --port 8000
+```
+
+Open `http://localhost:8000` in your browser.
+
+#### 4. Run a worker daemon
+
+In a new terminal:
+
+```bash
+synapse login            # device-code flow — approve in the Web UI
+synapse daemon run       # foreground daemon
+# or: synapse daemon install  # install as native service
+```
+
+Optionally run the TUI dashboard:
+
+```bash
+synapse tui              # Textual dashboard (separate terminal)
+```
+
+Other CLI commands: `synapse agent …`, `synapse env …`, `synapse plugin …`, `synapse --version`.
+
+### Option B: Run the Documentation Site Locally
+
+```bash
+cd synapse_docs
+npm install
+npm run dev              # http://localhost:3000
+npm run build            # for production
+```
 
 ---
 
 ## Testing
 
 ```bash
-# Cloud tests run against a REAL Supabase project (each test mints an RLS-isolated org).
+# Cloud tests (against a real Supabase project, RLS-isolated)
 python -m pytest tools/tests -k "not worker"
 
-# Worker tests are fully self-contained — no Supabase, no network (a MockCloud WS hub fixture).
+# Worker tests (self-contained, no network)
 python -m pytest tools/tests/worker
 
-# Live end-to-end: boots the real cloud + drives the real daemon over live WebSockets.
+# Live end-to-end (boots cloud + drives daemon over live WebSockets)
 python -m tools.tests.live_cloud_smoke
 ```
 
-> The full cloud suite is slow and can hit GoTrue rate limits under heavy back-to-back runs
-> — prefer per-module runs. The schema is already migrated; don't add migrations for
-> existing tables.
+> The full cloud suite can be slow and hit GoTrue rate limits. Prefer per-module runs.
+> The schema is already migrated; don't add migrations for existing tables.
 
 ---
 
-## Security model (at a glance)
+## Security model
 
-- **Execution & secrets stay local.** The cloud never runs an agent or sees a raw provider
-  key. Env-var values are X25519 sealed-box encrypted to the daemon; the cloud holds
-  ciphertext + names only.
-- **Redaction happens on-device** before any byte is uploaded (regex/entropy + optional
-  Presidio; salted tokens like `<REDACTED:API_KEY:a91f>`).
-- **Rules are enforced by the daemon, not the model** — a successful prompt injection still
-  can't get past a blocker. Findings feed an immutable audit log + a cloud anomaly detector.
-- **Per-device, revocable auth** via the device-code grant; refresh tokens rotate; the cloud
-  stores only token *hashes*.
-- **Durable, recoverable runs** via SQLite WAL checkpoints, E2E-encrypted to an org recovery
-  key so any authorized daemon can resume.
+- **Execution & secrets stay local.** The cloud never runs agents or sees raw provider keys. Env-var values are X25519 sealed-box encrypted to the daemon; the cloud holds ciphertext + names only.
+- **Redaction on-device** before any byte is uploaded (regex/entropy + optional Presidio). Salted tokens like `<REDACTED:API_KEY:a91f>`.
+- **Rules enforced by the daemon, not the model** — even a successful prompt injection can't bypass a blocker. Findings feed an immutable audit log + anomaly detector.
+- **Per-device, revocable auth** via RFC 8628 device-code grant. Refresh tokens rotate; the cloud stores only token hashes.
+- **Durable, recoverable runs** via SQLite WAL checkpoints, E2E-encrypted to an org recovery key so any authorized daemon can resume.
 
 ---
 
 ## Documentation
 
-The `docs/` specs are the behavioral source of truth:
+- **Public docs**: [synapse_docs/](synapse_docs/) (Next.js site with landing page + searchable docs)
+- **Product specs**: [docs/](docs/) (behavioral source of truth)
+  - [tui-daemon.md](docs/tui-daemon.md) — daemon design
+  - [cloud-backend.md](docs/cloud-backend.md) — broker/historian spec
+  - [web-ui.md](docs/web-ui.md) — UI spec + screens
+  - [integration.md](docs/integration.md) — system architecture + invariants
+  - [possible-features.md](docs/possible-features.md) — experimental designs (orchestration, agent-as-approver, model-comparison, drift monitoring)
 
-- **[docs/tui-daemon.md](docs/tui-daemon.md)** — the worker daemon (runtime, redaction,
-  ruleset, checkpointing, agent memory, capabilities).
-- **[docs/cloud-backend.md](docs/cloud-backend.md)** — the broker/historian (data model,
-  API surface, sync, recovery).
-- **[docs/web-ui.md](docs/web-ui.md)** — the web control surface.
-- **[docs/integration.md](docs/integration.md)** — how the three products fit together and
-  the invariants they preserve.
-- **[docs/possible-features.md](docs/possible-features.md)** — experimental, off-by-default
-  feature designs (agent orchestration, agent-as-approver, model-comparison runs, native
-  handoff protocol, behavioral-drift & intent monitoring), each with its own blast-radius
-  controls and promotion checklist.
+---
+
+## Development
+
+### Code organization
+
+- **synapse_worker**: Python 3.11+. CLI: Typer; TUI: Textual; async I/O: asyncio.
+- **synapse_cloud**: Python 3.10+. FastAPI, Supabase Python SDK, WebSockets.
+- **synapse_web**: React 18, TypeScript, Vite, TanStack Query, Zustand, Recharts.
+- **synapse_docs**: Next.js 15, React 19, TypeScript. Embedded legacy HTML docs.
+
+### Contributing
+
+- Keep changes focused. PRs should solve one problem.
+- Test locally: cloud tests need a real Supabase project. Worker tests are self-contained.
+- Documentation specs in `docs/` are the source of truth. Update them before implementing.
+- Experimental features go in `docs/possible-features.md` with blast-radius controls.
 
 ---
 
 ## Status
 
-The **Cloud Backend** and **TUI Worker Daemon** are implemented on `master`. The **Web UI**
-and the features in `docs/possible-features.md` are at the design stage. Experimental
-features are off by default, gated behind org-level flags and explicit consent, and excluded
-from `production`-tagged agents.
+- ✅ **Cloud Backend** — implemented and production-ready
+- ✅ **TUI Worker Daemon** — implemented and production-ready
+- ✅ **Web UI** — implemented and production-ready
+- ✅ **Documentation Site** — implemented (Next.js 15, with CTRL+K search)
+- 🔄 **Experimental features** (orchestration, agent-as-approver, model-comparison, drift monitoring) — designed in `docs/possible-features.md`, off-by-default, gated behind org flags
