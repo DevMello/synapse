@@ -1,0 +1,269 @@
+/* ───────────────────────────────────────────────────────────────────────────
+   Model Comparison Runs (§10) — the launcher's model multi-select and the
+   side-by-side comparison screen, in the Synapse editorial style. Reuses the
+   design tokens (warm ink/bone, single orange accent, status greens/blues);
+   no hardcoded colors.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* ── launcher: model multi-select ─────────────────────────────────────────── */
+.cmp-provider { padding: var(--space-2) 0; }
+.cmp-provider-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-2);
+  margin: var(--space-2) 0;
+}
+.cmp-model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-2);
+}
+.cmp-model-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: var(--space-3);
+  border: 1px solid var(--line-light);
+  border-radius: var(--radius-md);
+  background: var(--bone-0);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s;
+}
+.cmp-model-chip:hover { border-color: var(--accent-soft); }
+.cmp-model-chip.on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bone-0));
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.cmp-model-chip.disabled { opacity: 0.5; cursor: not-allowed; }
+.cmp-model-name { font-weight: 600; font-size: 13px; }
+.cmp-model-price { font-size: 11px; color: var(--ink-2); }
+.cmp-nokey { color: var(--status-warn); }
+
+.cmp-controls {
+  display: flex;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line-light);
+}
+.cmp-control { display: flex; align-items: center; gap: var(--space-2); font-size: 13px; }
+
+.cmp-launchbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-top: var(--space-4);
+}
+.cmp-estimate { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.cmp-nx { color: var(--ink-2); }
+.cmp-confirm { display: flex; align-items: center; gap: var(--space-2); font-size: 13px; }
+.cmp-hint { font-size: 12px; margin-top: var(--space-2); }
+
+/* ── status pills ─────────────────────────────────────────────────────────── */
+.cmp-status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  text-transform: lowercase;
+}
+.cmp-status--running, .cmp-status--ready_for_review { background: var(--status-info-bg); color: var(--status-info); }
+.cmp-status--succeeded { background: var(--status-ok-bg); color: var(--status-ok); }
+.cmp-status--failed { background: var(--status-warn-bg); color: var(--status-warn); }
+.cmp-status--closed, .cmp-status--skipped { background: var(--status-muted-bg); color: var(--ink-2); }
+
+/* ── comparison screen ────────────────────────────────────────────────────── */
+.cmp-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  margin: var(--space-3) 0;
+  border-radius: var(--radius-md);
+  background: var(--status-warn-bg);
+  color: var(--ink);
+  font-size: 13px;
+}
+.cmp-banner svg { color: var(--status-warn); flex: 0 0 auto; margin-top: 2px; }
+
+.cmp-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-2) 0;
+}
+.cmp-summary-stat { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
+.cmp-spacer { flex: 1; }
+.cmp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--bone-1);
+  font-size: 11px;
+}
+.cmp-badge-l { color: var(--ink-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.cmp-badge-v { font-family: var(--font-mono); font-weight: 600; }
+.cmp-sortbar { display: inline-flex; gap: 4px; }
+.cmp-sort {
+  border: 1px solid var(--line-light);
+  background: transparent;
+  border-radius: var(--radius-pill);
+  padding: 3px 10px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  color: var(--ink-2);
+}
+.cmp-sort.on { background: var(--accent); color: var(--bone-0); border-color: var(--accent); }
+
+/* ── per-model columns ────────────────────────────────────────────────────── */
+.cmp-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+.cmp-col {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-light);
+  border-radius: var(--radius-lg);
+  background: var(--bone-0);
+  padding: var(--space-3);
+}
+.cmp-col.winner {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset, 0 6px 18px var(--accent-glow);
+}
+.cmp-col-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.cmp-col-model { font-weight: 600; font-size: 14px; word-break: break-all; }
+.cmp-metrics {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--ink-2);
+  margin: var(--space-2) 0;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--line-light);
+}
+.cmp-metrics span { display: inline-flex; align-items: center; gap: 4px; }
+.cmp-section-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-2);
+  margin: var(--space-3) 0 var(--space-1);
+}
+.cmp-count {
+  background: var(--accent);
+  color: var(--bone-0);
+  border-radius: var(--radius-pill);
+  padding: 0 6px;
+  font-size: 10px;
+}
+.cmp-output {
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  max-height: 220px;
+  overflow: auto;
+}
+.cmp-error {
+  display: flex; align-items: center; gap: 5px;
+  color: var(--status-warn); font-size: 12px; margin-top: var(--space-2);
+}
+.cmp-actions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.cmp-actions li {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; padding: 4px 6px;
+  border-radius: var(--radius-sm); background: var(--bone-1);
+}
+.cmp-actions li.hitl { background: var(--status-warn-bg); }
+.cmp-actions code { font-family: var(--font-mono); font-size: 12px; }
+.cmp-tag {
+  margin-left: auto; font-size: 10px; font-family: var(--font-mono);
+  color: var(--status-warn); text-transform: uppercase; letter-spacing: 0.04em;
+}
+.cmp-hitl { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--status-warn); margin-top: var(--space-2); }
+.cmp-toolcalls { font-size: 11px; margin-top: var(--space-2); }
+.cmp-col-foot { margin-top: auto; padding-top: var(--space-3); }
+.cmp-winner-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  color: var(--accent-deep); font-weight: 600; font-size: 13px;
+}
+
+/* ── output diff ──────────────────────────────────────────────────────────── */
+.cmp-diff {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+}
+.cmp-diff-col {
+  border: 1px solid var(--line-light);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bone-0);
+}
+.cmp-diff-head {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bone-1);
+  border-bottom: 1px solid var(--line-light);
+}
+.cmp-diff-line {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  padding: 2px var(--space-3);
+}
+.cmp-diff-line.changed { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+/* ── library ──────────────────────────────────────────────────────────────── */
+.cmp-lib {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+.cmp-libcard {
+  border: 1px solid var(--line-light);
+  border-radius: var(--radius-lg);
+  background: var(--bone-0);
+  padding: var(--space-3);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.cmp-libcard:hover { border-color: var(--accent-soft); transform: translateY(-1px); }
+.cmp-libcard-head { display: flex; align-items: center; justify-content: space-between; }
+.cmp-libcard-time { font-size: 11px; color: var(--ink-2); }
+.cmp-libcard-models { display: flex; flex-wrap: wrap; gap: 4px; margin: var(--space-2) 0; }
+.cmp-chip {
+  font-family: var(--font-mono); font-size: 11px;
+  padding: 2px 8px; border-radius: var(--radius-pill);
+  background: var(--bone-1);
+}
+.cmp-chip.win { background: var(--accent); color: var(--bone-0); }
+.cmp-libcard-foot { display: flex; gap: var(--space-3); flex-wrap: wrap; font-size: 11px; align-items: center; }
+.cmp-libcard-foot span { display: inline-flex; align-items: center; gap: 4px; }
+.cmp-libcard-winner { color: var(--accent-deep); }
+
+.cmp-empty {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-3);
+  padding: var(--space-9) var(--space-4); color: var(--ink-2); text-align: center;
+}
+.cmp-empty svg { color: var(--accent); }

@@ -186,6 +186,57 @@ export interface ChainGrant {
   created: string; // relative
 }
 
+// ── Model Comparison Runs (§10) ──────────────────────────────────────────────
+export type RunGroupStatus = "running" | "ready_for_review" | "closed";
+export type VariantStatus = "running" | "succeeded" | "failed" | "skipped";
+
+// One model offered in the launcher, with its per-task price estimate (§10.9).
+export interface AvailableModel {
+  model: string;
+  provider: string;
+  inputPerMtok: number;
+  outputPerMtok: number;
+  hasCredentials: boolean;
+  estimateUsd: number;
+}
+
+// A side-effecting tool call a variant WOULD have made in draft mode (§10.5).
+export interface ProposedAction {
+  name: string;
+  argsRedacted: unknown;
+  hitl: boolean; // true if this was a "would have paused for approval" gate
+}
+
+// One model's run within a comparison group (§10.6).
+export interface ComparisonVariant {
+  runId: string;
+  model: string;
+  status: VariantStatus;
+  costUsd: number;
+  tokensIn: number;
+  tokensOut: number;
+  latencyMs?: number;
+  output: string;
+  error?: string | null;
+  toolCalls: { name: string; simulated: boolean }[];
+  proposedActions: ProposedAction[];
+  simulatedHitl: { name: string; argsRedacted: unknown }[];
+  isWinner: boolean;
+}
+
+// A "Compare models" launch — the run group + its variants (§10.10).
+export interface RunGroup {
+  id: string;
+  agentId: string;
+  status: RunGroupStatus;
+  models: string[];
+  totalCostUsd: number;
+  groupCostCap?: number | null;
+  winnerRunId?: string | null;
+  created: string; // relative
+  variants: ComparisonVariant[];
+}
+
 export type Severity = "block" | "require-approval" | "warn";
 
 export interface Approval {
