@@ -19,10 +19,6 @@ export interface ResolvedApproval {
 }
 
 interface UIState {
-  // active org
-  activeOrgId: string;
-  setActiveOrgId: (id: string) => void;
-
   // command palette
   paletteOpen: boolean;
   setPalette: (open: boolean) => void;
@@ -94,7 +90,4 @@ export const useUI = create<UIState>((set, get) => ({
     }));
   },
   resetApprovals: () => set({ approvals: seedApprovals, resolved: [] }),
-
-  activeOrgId: "personal",
-  setActiveOrgId: (id) => set({ activeOrgId: id }),
 }));

@@ -251,6 +251,111 @@ export type Database = {
           },
         ]
       }
+      agent_flows: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          daemon_id: string | null
+          edges: Json
+          id: string
+          name: string
+          nodes: Json
+          org_id: string
+          published_grant_id: string | null
+          settings: Json
+          status: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          daemon_id?: string | null
+          edges?: Json
+          id?: string
+          name?: string
+          nodes?: Json
+          org_id: string
+          published_grant_id?: string | null
+          settings?: Json
+          status?: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          daemon_id?: string | null
+          edges?: Json
+          id?: string
+          name?: string
+          nodes?: Json
+          org_id?: string
+          published_grant_id?: string | null
+          settings?: Json
+          status?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: []
+      }
+      agent_chain_grants: {
+        Row: {
+          chain_budget_usd: number
+          created_at: string
+          daemon_id: string
+          edges: Json
+          expires_at: string
+          flow_id: string | null
+          granted_by: string | null
+          id: string
+          key_id: string | null
+          max_hops: number
+          max_payload_bytes: number
+          modes: string[]
+          org_id: string
+          revoked_at: string | null
+          routing: string
+          signature: string | null
+        }
+        Insert: {
+          chain_budget_usd?: number
+          created_at?: string
+          daemon_id: string
+          edges?: Json
+          expires_at: string
+          flow_id?: string | null
+          granted_by?: string | null
+          id?: string
+          key_id?: string | null
+          max_hops?: number
+          max_payload_bytes?: number
+          modes?: string[]
+          org_id: string
+          revoked_at?: string | null
+          routing?: string
+          signature?: string | null
+        }
+        Update: {
+          chain_budget_usd?: number
+          created_at?: string
+          daemon_id?: string
+          edges?: Json
+          expires_at?: string
+          flow_id?: string | null
+          granted_by?: string | null
+          id?: string
+          key_id?: string | null
+          max_hops?: number
+          max_payload_bytes?: number
+          modes?: string[]
+          org_id?: string
+          revoked_at?: string | null
+          routing?: string
+          signature?: string | null
+        }
+        Relationships: []
+      }
       agent_orchestration_grants: {
         Row: {
           agent_id: string
@@ -1872,6 +1977,9 @@ export type Database = {
           depth: number
           ended_at: string | null
           exit_code: number | null
+          flow_id: string | null
+          handoff_mode: string | null
+          hop: number
           id: string
           idempotency_key: string | null
           initiator: string
@@ -1895,6 +2003,9 @@ export type Database = {
           depth?: number
           ended_at?: string | null
           exit_code?: number | null
+          flow_id?: string | null
+          handoff_mode?: string | null
+          hop?: number
           id?: string
           idempotency_key?: string | null
           initiator?: string
@@ -1918,6 +2029,9 @@ export type Database = {
           depth?: number
           ended_at?: string | null
           exit_code?: number | null
+          flow_id?: string | null
+          handoff_mode?: string | null
+          hop?: number
           id?: string
           idempotency_key?: string | null
           initiator?: string

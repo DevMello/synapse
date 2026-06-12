@@ -72,6 +72,7 @@ export interface Agent {
   tokensToday: number;
   model: string;
   desc: string;
+  tags?: string[]; // 'production' excludes an agent from chain nodes (§4 / §11)
 }
 
 export type RunTrigger = "webhook" | "schedule" | "manual";
@@ -119,6 +120,70 @@ export interface Grant {
 export interface RunLineage {
   run: Run;
   children: RunLineage[];
+}
+
+// ── Native Handoff Protocol — Flow Canvas (§11) ──────────────────────────────
+export type HandoffMode = "tail" | "return";
+export type FlowStatus = "draft" | "published" | "archived";
+// Structural nodes (start/router/return/end) are UX-only; only `agent` nodes carry
+// an agentId and become edges in the signed chain grant.
+export type FlowNodeKind = "agent" | "start" | "router" | "return" | "end";
+
+export interface FlowNode {
+  id: string;
+  kind: FlowNodeKind;
+  agentId?: string; // set when kind === "agent"
+  label: string;
+  x: number;
+  y: number;
+}
+
+export interface FlowEdge {
+  id: string;
+  from: string; // node id
+  to: string; // node id
+  mode: HandoffMode;
+  when?: string | null; // router branch condition (H7)
+  mapping?: { task?: string; summary?: string; artifacts?: string }; // payload field map
+}
+
+export interface FlowSettings {
+  maxHops: number;
+  chainBudgetUsd: number;
+  maxPayloadBytes: number;
+  modes: HandoffMode[];
+  routing: "first_match";
+}
+
+export interface AgentFlow {
+  id: string;
+  daemonId?: string;
+  name: string;
+  version: number;
+  status: FlowStatus;
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+  settings: FlowSettings;
+  publishedGrantId?: string | null;
+  created: string; // relative
+  updated: string; // relative
+}
+
+// The signed edge-graph grant a published flow compiles into (§11.4).
+export interface ChainGrant {
+  id: string;
+  daemonId: string;
+  flowId?: string;
+  edges: { from: string; to: string; mode: HandoffMode; when?: string | null }[];
+  routing: string;
+  maxHops: number;
+  chainBudgetUsd: number;
+  maxPayloadBytes: number;
+  modes: HandoffMode[];
+  expiresAt: string; // relative
+  revoked: boolean;
+  grantedBy: string;
+  created: string; // relative
 }
 
 export type Severity = "block" | "require-approval" | "warn";

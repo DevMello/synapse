@@ -167,7 +167,21 @@ CREATE TABLE IF NOT EXISTS orchestration_grants (
     cached_at   REAL
 );
 
+-- Cached, cloud-signed CHAIN grants for the Native Handoff Protocol (§11.4). Verified
+-- offline before each handoff, exactly like orchestration_grants. The grant carries a
+-- signed directed graph of allowed handoff edges (H3); enforcement is daemon-local.
+CREATE TABLE IF NOT EXISTS chain_grants (
+    grant_id    TEXT PRIMARY KEY,
+    daemon_id   TEXT,            -- H2: same-daemon only
+    flow_id     TEXT,            -- which published design produced this grant
+    core        TEXT,            -- canonical signed-fields JSON (delivered verbatim)
+    signature   TEXT,            -- base64 ed25519 signature over core
+    public_key  TEXT,            -- delivered key (informational; daemon verifies w/ trusted key)
+    cached_at   REAL
+);
+
 -- Orchestration lineage WAL: one row per agent-initiated child (§2.4 step 4).
+-- Reused by handoff hops (verb='handoff'), so orchestration.halt cancels chains too.
 CREATE TABLE IF NOT EXISTS orchestration_lineage (
     seq           INTEGER PRIMARY KEY AUTOINCREMENT,
     parent_run_id TEXT,
