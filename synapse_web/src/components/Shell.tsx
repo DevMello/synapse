@@ -18,6 +18,7 @@ const NAV_SECTIONS: NavSection[] = [
   ] },
   { label: "Operate", items: [
     { id: "runs", icon: "activity", name: "Runs", path: "/runs" },
+    { id: "flows", icon: "git-branch", name: "Flows", path: "/flows" },
     { id: "approvals", icon: "shield", name: "Approvals", path: "/approvals", badge: "approvals" },
     { id: "alerts", icon: "bell-ring", name: "Alerts", path: "/alerts", badge: "alerts" },
   ] },
@@ -33,6 +34,7 @@ const NAV_SECTIONS: NavSection[] = [
 
 const VIEW_TITLES: Record<string, string> = {
   "": "Dashboard", agents: "Agents", daemons: "Daemons", runs: "Runs",
+  flows: "Flow Canvas",
   approvals: "Approvals", alerts: "Alerts", marketplace: "Marketplace",
   webhooks: "Webhooks", notifications: "Notifications", settings: "Settings",
   connect: "Connect a device", account: "Account",

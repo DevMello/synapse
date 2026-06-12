@@ -18,6 +18,8 @@ const Webhooks = lazy(() => import("./screens/Webhooks"));
 const Notifications = lazy(() => import("./screens/Notifications"));
 const Settings = lazy(() => import("./screens/Settings"));
 const AgentDetail = lazy(() => import("./screens/agent/AgentDetail"));
+const Flows = lazy(() => import("./screens/Flows"));
+const FlowCanvas = lazy(() => import("./screens/flow/FlowCanvas"));
 const Organizations = lazy(() => import("./screens/Organizations"));
 const OrgSettings = lazy(() => import("./screens/OrgSettings"));
 
@@ -30,6 +32,8 @@ export const router = createBrowserRouter(
         { index: true, element: <Dashboard /> },
         { path: "agents", element: <Agents /> },
         { path: "agents/:agentId", element: <AgentDetail /> },
+        { path: "flows", element: <Flows /> },
+        { path: "flows/:flowId", element: <FlowCanvas /> },
         { path: "daemons", element: <Daemons /> },
         { path: "connect", element: <Connect /> },
         { path: "runs", element: <Runs /> },

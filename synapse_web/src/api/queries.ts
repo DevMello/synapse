@@ -26,6 +26,11 @@ export {
 } from "./queries/teams";
 export { useOrchestrationGrants, useMintGrant, useRevokeGrant } from "./queries/grants";
 export { useAgentLineage } from "./queries/lineage";
+export {
+  useFlows, useFlow, useCreateFlow, useSaveFlow, useArchiveFlow,
+  useChainGrants, usePublishFlow, useRevokeChainGrant,
+} from "./queries/flows";
+export { useFlowTrace } from "./queries/flowTrace";
 
 // Synchronous accessor for components that need the busy-fleet snapshot (e.g.
 // cross-referencing an agent's host daemon) without a hook subscription. Screen-
