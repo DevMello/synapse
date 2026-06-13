@@ -12,8 +12,12 @@ can't run shell here — see the /batch note in [[web_supabase_migration]]).
 mode (read-only tools run; side-effecting + HITL simulated); E4 promote = a fresh live single-model
 re-run, not a replay; E5 API agents only in v1.
 
-**Schema:** migration `0020_comparison_runs` (NOT yet applied to live `gpxfylwhwdsswbgicgby` — no
-PG/CLI access here; maintainer applies, same as 0015/0019). `run_groups` (agent_id, daemon_id, input
+**Schema:** migration `0020_comparison_runs` **APPLIED to live `gpxfylwhwdsswbgicgby`** (2026-06-13,
+via the Supabase MCP `apply_migration`; security advisors show no new issues — run_groups has RLS +
+policies). `synapse_web/src/lib/database.types.ts` updated with the run_groups table + the
+runs/tool_calls/hitl_requests columns (spliced by hand, NOT a full regenerate: regenerating from live
+drops the §11 handoff types because 0017/0018/0019 are still unapplied to live — the repo types are
+intentionally ahead of live). `run_groups` (agent_id, daemon_id, input
 jsonb, selected_models[], status running/ready_for_review/closed, winner_run_id, total_cost_usd,
 group_cost_cap, max_parallel_variants); `runs +=` run_group_id/variant_model/is_winner/mode(normal|
 comparison_variant); `tool_calls +=` simulated/proposed_action; `hitl_requests +=` simulated. RLS:
@@ -74,9 +78,14 @@ agent_id can't be resolved (runs.agent_id is NOT NULL); (3) select_winner clear-
 - The daemon API adapter was single-shot before this; the agentic loop is NEW. `_post` stays the only
   network seam — tests inject canned multi-turn bodies (no network/keys). Single-shot back-compat: with
   no `[[tools]]`, max_iters=1 (one turn), identical to the old behavior — existing runtime tests pass.
-- Migration 0020 + generated `database.types.ts` NOT regenerated for live → Supabase read path casts;
-  the LIVE end-to-end (real comparison over a daemon, DB-integration endpoint tests) is **deferred**
-  until the maintainer applies 0020. To demo the canvas offline, move `synapse_web/.env` aside (MOCK).
+- Migration 0020 is now applied to live + `database.types.ts` carries the comparison tables, so the
+  Supabase read path is type-correct (the `sb()` cast in queries/comparisons.ts is now belt-and-braces,
+  not load-bearing). LIVE end-to-end over a real daemon still needs the `comparison` capability bound
+  per-run by the engine (same deferred wiring as §2's MCP) + DB-integration endpoint tests. To demo
+  offline, move `synapse_web/.env` aside (MOCK).
+- **Do NOT** run a full `generate_typescript_types` against live and overwrite database.types.ts: live
+  lacks 0017/0018/0019, so a clean regenerate DROPS the handoff (`agent_flows`, `runs.hop`, …) types and
+  breaks `tsc`. Splice new tables/columns by hand until 0017–0019 are also applied to live.
 - `comparison.variant_finished` carries proposed_actions/tool_calls so the cloud can populate
   `tool_calls` rows (simulated/proposed_action) — the web reads those from Supabase for the columns.
 

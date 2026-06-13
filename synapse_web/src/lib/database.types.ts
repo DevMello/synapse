@@ -1185,6 +1185,7 @@ export type Database = {
           resolved_by: string | null
           run_id: string | null
           severity: Database["public"]["Enums"]["hitl_severity"]
+          simulated: boolean
           status: Database["public"]["Enums"]["hitl_status"]
         }
         Insert: {
@@ -1201,6 +1202,7 @@ export type Database = {
           resolved_by?: string | null
           run_id?: string | null
           severity?: Database["public"]["Enums"]["hitl_severity"]
+          simulated?: boolean
           status?: Database["public"]["Enums"]["hitl_status"]
         }
         Update: {
@@ -1217,6 +1219,7 @@ export type Database = {
           resolved_by?: string | null
           run_id?: string | null
           severity?: Database["public"]["Enums"]["hitl_severity"]
+          simulated?: boolean
           status?: Database["public"]["Enums"]["hitl_status"]
         }
         Relationships: [
@@ -1967,6 +1970,89 @@ export type Database = {
           },
         ]
       }
+      run_groups: {
+        Row: {
+          agent_id: string
+          agent_version: number | null
+          created_at: string
+          created_by: string | null
+          daemon_id: string | null
+          group_cost_cap: number | null
+          id: string
+          input: Json
+          max_parallel_variants: number
+          org_id: string
+          selected_models: string[]
+          status: string
+          total_cost_usd: number
+          updated_at: string
+          winner_run_id: string | null
+        }
+        Insert: {
+          agent_id: string
+          agent_version?: number | null
+          created_at?: string
+          created_by?: string | null
+          daemon_id?: string | null
+          group_cost_cap?: number | null
+          id?: string
+          input?: Json
+          max_parallel_variants?: number
+          org_id: string
+          selected_models?: string[]
+          status?: string
+          total_cost_usd?: number
+          updated_at?: string
+          winner_run_id?: string | null
+        }
+        Update: {
+          agent_id?: string
+          agent_version?: number | null
+          created_at?: string
+          created_by?: string | null
+          daemon_id?: string | null
+          group_cost_cap?: number | null
+          id?: string
+          input?: Json
+          max_parallel_variants?: number
+          org_id?: string
+          selected_models?: string[]
+          status?: string
+          total_cost_usd?: number
+          updated_at?: string
+          winner_run_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "run_groups_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "run_groups_daemon_id_fkey"
+            columns: ["daemon_id"]
+            isOneToOne: false
+            referencedRelation: "daemons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "run_groups_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "run_groups_winner_run_id_fkey"
+            columns: ["winner_run_id"]
+            isOneToOne: false
+            referencedRelation: "runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       runs: {
         Row: {
           agent_id: string
@@ -1984,15 +2070,19 @@ export type Database = {
           idempotency_key: string | null
           initiator: string
           initiator_agent_id: string | null
+          is_winner: boolean
+          mode: string
           org_id: string
           parent_run_id: string | null
           redaction_summary: Json | null
           root_run_id: string | null
+          run_group_id: string | null
           started_at: string | null
           status: Database["public"]["Enums"]["run_status"]
           tokens_in: number
           tokens_out: number
           trigger: Database["public"]["Enums"]["trigger_source"]
+          variant_model: string | null
         }
         Insert: {
           agent_id: string
@@ -2010,15 +2100,19 @@ export type Database = {
           idempotency_key?: string | null
           initiator?: string
           initiator_agent_id?: string | null
+          is_winner?: boolean
+          mode?: string
           org_id: string
           parent_run_id?: string | null
           redaction_summary?: Json | null
           root_run_id?: string | null
+          run_group_id?: string | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["run_status"]
           tokens_in?: number
           tokens_out?: number
           trigger?: Database["public"]["Enums"]["trigger_source"]
+          variant_model?: string | null
         }
         Update: {
           agent_id?: string
@@ -2036,15 +2130,19 @@ export type Database = {
           idempotency_key?: string | null
           initiator?: string
           initiator_agent_id?: string | null
+          is_winner?: boolean
+          mode?: string
           org_id?: string
           parent_run_id?: string | null
           redaction_summary?: Json | null
           root_run_id?: string | null
+          run_group_id?: string | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["run_status"]
           tokens_in?: number
           tokens_out?: number
           trigger?: Database["public"]["Enums"]["trigger_source"]
+          variant_model?: string | null
         }
         Relationships: [
           {
@@ -2250,8 +2348,10 @@ export type Database = {
           latency_ms: number | null
           name: string
           org_id: string
+          proposed_action: boolean
           result_redacted: Json | null
           run_id: string
+          simulated: boolean
         }
         Insert: {
           args_redacted?: Json | null
@@ -2261,8 +2361,10 @@ export type Database = {
           latency_ms?: number | null
           name: string
           org_id: string
+          proposed_action?: boolean
           result_redacted?: Json | null
           run_id: string
+          simulated?: boolean
         }
         Update: {
           args_redacted?: Json | null
@@ -2272,8 +2374,10 @@ export type Database = {
           latency_ms?: number | null
           name?: string
           org_id?: string
+          proposed_action?: boolean
           result_redacted?: Json | null
           run_id?: string
+          simulated?: boolean
         }
         Relationships: [
           {
