@@ -343,6 +343,52 @@ async def test_handle_compare_launches_group(store, monkeypatch):
     assert captured["max_parallel_variants"] == 2
 
 
+# ── 6. promote: per-run model override (§10 E4 "run winner for real") ─────────
+def test_apply_model_override_pins_model_and_provider():
+    from synapse_worker.commands.agents import _apply_model_override
+
+    m = _manifest(model="base-model")
+    m.api["provider"] = "anthropic"
+    _apply_model_override(m, {"variant_model": "gpt-5", "variant_provider": "openai"})
+    assert m.api["model"] == "gpt-5"
+    assert m.api["provider"] == "openai"
+
+
+def test_apply_model_override_noop_without_variant_or_for_cli():
+    from synapse_worker.commands.agents import _apply_model_override
+
+    m = _manifest(model="base-model")
+    _apply_model_override(m, {})                       # no override → unchanged
+    assert m.api["model"] == "base-model"
+    m.type = "cli"
+    _apply_model_override(m, {"variant_model": "gpt-5"})  # CLI agents excluded (E5)
+    assert m.api["model"] == "base-model"
+
+
+@pytest.mark.asyncio
+async def test_handle_run_honors_model_override(store, monkeypatch):
+    """The promoted winner re-runs LIVE with the winning model, not the agent's default."""
+    import synapse_worker.commands.agents as agents
+    from synapse_worker.router import CommandContext
+
+    await _deploy_agent(store)
+    seen: list[str] = []
+
+    async def fake_post(self, url, *, headers, json):
+        seen.append(json.get("model"))
+        return {"content": [{"type": "text", "text": "ok"}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+    monkeypatch.setattr(ApiAdapter, "_post", fake_post)
+
+    await agents.handle_run(
+        CommandContext(command_type="agent.run", daemon_id="d"),
+        {"run_id": "rn-promote", "agent_id": "agt_cmp",
+         "variant_model": "gpt-5", "variant_provider": "openai", "input": {}},
+    )
+    await agents._running["rn-promote"]              # let the background run settle
+    assert seen == ["gpt-5"]                          # ran the pinned model, not "base-model"
+
+
 @pytest.mark.asyncio
 async def test_handle_compare_ignores_bad_payload(store, monkeypatch):
     import synapse_worker.commands.comparison as cmd

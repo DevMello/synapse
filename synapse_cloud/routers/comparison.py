@@ -31,6 +31,7 @@ from ..comparison_pricing import (
     DEFAULT_OUTPUT_TOKENS,
     estimate_group,
     known_models,
+    provider_of,
 )
 from ..db import service_db
 from ..deps import Principal, get_principal, require_write
@@ -346,9 +347,10 @@ async def promote_winner(
                 "agent_id": agent_id,
                 "trigger": "manual",
                 "input": group.get("input") or {},
-                # The promoted model is recorded; live model-pinning in the runtime is a
-                # follow-up wiring item (the run executes with the agent's configured model).
+                # Pin the WINNING model (+ its provider, which may differ from the agent's
+                # default) onto this live run — the daemon's agent.run honors the override.
                 "variant_model": variant_model,
+                "variant_provider": provider_of(variant_model) if variant_model else None,
             },
             idempotency_key=f"agent.run:{run_id}",
         )

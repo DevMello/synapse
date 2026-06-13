@@ -92,6 +92,10 @@ async def handle_run(ctx: CommandContext, payload: dict[str, Any]) -> None:
         await _emit_failed(run_id, "agent not found")
         return
 
+    # Optional per-run model override — §10 "run winner for real" pins the WINNING model
+    # (and its provider) onto this otherwise-normal run, rather than the agent's default.
+    _apply_model_override(manifest, payload)
+
     prompt_vars = payload.get("prompt_vars") or {}
     env = payload.get("env") or {}
 
@@ -194,6 +198,25 @@ async def _load_manifest(agent_id: str) -> Optional[AgentManifest]:
         except ManifestError:
             return None
     return None
+
+
+def _apply_model_override(manifest: AgentManifest, payload: dict[str, Any]) -> None:
+    """Pin a different model/provider onto this run when the payload carries one.
+
+    Used by the §10 "run winner for real" promotion: the winning model (and its provider,
+    which may differ from the agent's default) is re-run live. Only applies to API agents —
+    ``model`` is a first-class field there (E5). The manifest is freshly loaded per run, so
+    mutating it in place corrupts nothing shared.
+    """
+    model = payload.get("variant_model")
+    if not model or manifest.type != "api":
+        return
+    api = dict(manifest.api or {})
+    api["model"] = model
+    provider = payload.get("variant_provider")
+    if provider:
+        api["provider"] = provider
+    manifest.api = api
 
 
 def _manifest_toml(

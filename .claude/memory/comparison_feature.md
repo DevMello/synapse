@@ -79,11 +79,15 @@ agent_id can't be resolved (runs.agent_id is NOT NULL); (3) select_winner clear-
 - The daemon API adapter was single-shot before this; the agentic loop is NEW. `_post` stays the only
   network seam — tests inject canned multi-turn bodies (no network/keys). Single-shot back-compat: with
   no `[[tools]]`, max_iters=1 (one turn), identical to the old behavior — existing runtime tests pass.
-- Migration 0020 is now applied to live + `database.types.ts` carries the comparison tables, so the
-  Supabase read path is type-correct (the `sb()` cast in queries/comparisons.ts is now belt-and-braces,
-  not load-bearing). LIVE end-to-end over a real daemon still needs the `comparison` capability bound
-  per-run by the engine (same deferred wiring as §2's MCP) + DB-integration endpoint tests. To demo
-  offline, move `synapse_web/.env` aside (MOCK).
+- Comparison is **fully wired into the daemon runtime** — it's command-driven
+  (`@on_command("agent.compare")`/`comparison.cancel` → `comparison/executor.run_group` → the real
+  `RunEngine`), so there is NO agent-facing-MCP "bind per-run" gap like §2 had (that earlier note was
+  a false parallel). **Promote model-pinning is now implemented** (E4): `commands/agents.py`
+  `_apply_model_override` pins the winning model+provider onto the live re-run, and the cloud promote
+  endpoint sends `variant_provider = provider_of(model)`. Migration 0020 applied to live +
+  `database.types.ts` carries the comparison tables, so the Supabase read path is type-correct (the
+  `sb()` cast in queries/comparisons.ts is now belt-and-braces, not load-bearing). To demo offline,
+  move `synapse_web/.env` aside (MOCK).
 - Live is now in sync with `main` (0015–0020 all present), so a clean `generate_typescript_types`
   regenerate is safe — it no longer drops the §11 handoff types. (History gotcha for next time: live had
   been modified out-of-band — 0017's tables existed but weren't in the migration history, and 0018/0019
@@ -92,8 +96,8 @@ agent_id can't be resolved (runs.agent_id is NOT NULL); (3) select_winner clear-
 - `comparison.variant_finished` carries proposed_actions/tool_calls so the cloud can populate
   `tool_calls` rows (simulated/proposed_action) — the web reads those from Supabase for the columns.
 
-**Deferred:** apply 0020 to live + DB-integration endpoint/inbound tests; live model-pinning for the
-**promote** path (the re-run currently executes with the agent's configured model; the winning model
-is recorded in audit + runs.variant_model but the daemon doesn't yet honor a per-run model override);
-provider rate-limit backoff on fan-out; feature-flag/consent + production-exclusion gating at org level
-(off-by-default §4); semantic diff/grading beyond the textual line diff.
+**Deferred (remaining):** DB-integration endpoint/inbound tests against live Supabase (now unblocked —
+0020 is applied; cloud unit tests stay table-free); provider rate-limit backoff on fan-out;
+feature-flag/consent + production-exclusion gating at org level (off-by-default §4); semantic
+diff/grading beyond the textual line diff. (DONE since first cut: 0020 applied to live; promote
+model-pinning.)
