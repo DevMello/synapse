@@ -31,6 +31,10 @@ export {
   useChainGrants, usePublishFlow, useRevokeChainGrant,
 } from "./queries/flows";
 export { useFlowTrace } from "./queries/flowTrace";
+export {
+  useComparisonModels, useComparisons, useComparison,
+  useLaunchComparison, useCancelComparison, useSelectWinner, usePromoteWinner,
+} from "./queries/comparisons";
 
 // Synchronous accessor for components that need the busy-fleet snapshot (e.g.
 // cross-referencing an agent's host daemon) without a hook subscription. Screen-

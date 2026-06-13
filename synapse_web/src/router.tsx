@@ -20,6 +20,8 @@ const Settings = lazy(() => import("./screens/Settings"));
 const AgentDetail = lazy(() => import("./screens/agent/AgentDetail"));
 const Flows = lazy(() => import("./screens/Flows"));
 const FlowCanvas = lazy(() => import("./screens/flow/FlowCanvas"));
+const Comparisons = lazy(() => import("./screens/Comparisons"));
+const ComparisonView = lazy(() => import("./screens/comparison/ComparisonView"));
 const Organizations = lazy(() => import("./screens/Organizations"));
 const OrgSettings = lazy(() => import("./screens/OrgSettings"));
 
@@ -34,6 +36,8 @@ export const router = createBrowserRouter(
         { path: "agents/:agentId", element: <AgentDetail /> },
         { path: "flows", element: <Flows /> },
         { path: "flows/:flowId", element: <FlowCanvas /> },
+        { path: "comparisons", element: <Comparisons /> },
+        { path: "comparisons/:groupId", element: <ComparisonView /> },
         { path: "daemons", element: <Daemons /> },
         { path: "connect", element: <Connect /> },
         { path: "runs", element: <Runs /> },

@@ -68,6 +68,7 @@ class RunEngine:
         run_id: str,
         prompt_vars: dict[str, Any],
         env: Optional[dict[str, str]] = None,
+        tool_executor: Optional[Any] = None,
     ) -> RunResult:
         prompt_vars = dict(prompt_vars or {})
         env = dict(env or {})
@@ -82,6 +83,9 @@ class RunEngine:
             prompt_vars=prompt_vars,
             env=env,
             emit=self._make_emit(run_id, manifest.id),
+            # §10: a comparison variant injects a draft-mode tool shim so side-effecting
+            # tool calls are simulated, not executed. None -> adapter's default executor.
+            tool_executor=tool_executor,
         )
 
         await self._record_start(run_id, manifest.id)

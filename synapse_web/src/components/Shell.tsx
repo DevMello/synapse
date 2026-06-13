@@ -19,6 +19,7 @@ const NAV_SECTIONS: NavSection[] = [
   { label: "Operate", items: [
     { id: "runs", icon: "activity", name: "Runs", path: "/runs" },
     { id: "flows", icon: "git-branch", name: "Flows", path: "/flows" },
+    { id: "comparisons", icon: "git-pull-request", name: "Compare", path: "/comparisons" },
     { id: "approvals", icon: "shield", name: "Approvals", path: "/approvals", badge: "approvals" },
     { id: "alerts", icon: "bell-ring", name: "Alerts", path: "/alerts", badge: "alerts" },
   ] },

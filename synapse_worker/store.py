@@ -211,6 +211,53 @@ CREATE TABLE IF NOT EXISTS command_keys (
     public_key TEXT NOT NULL,
     fetched_at REAL NOT NULL
 );
+
+-- Model Comparison Runs (§10). A "Compare models" launch is a `comparison_groups` row;
+-- each selected model becomes a `comparison_variants` row (a normal run in draft mode).
+-- proposed_actions/sim_hitl record what each variant WOULD have done (E3 draft mode).
+CREATE TABLE IF NOT EXISTS comparison_groups (
+    group_id     TEXT PRIMARY KEY,
+    agent_id     TEXT,
+    models       TEXT,            -- JSON array of selected models
+    status       TEXT,            -- running | ready_for_review | closed | cancelled
+    cost_cap     REAL,            -- group aggregate hard cap (null = none)
+    total_cost   REAL DEFAULT 0,
+    created_at   REAL,
+    updated_at   REAL
+);
+CREATE TABLE IF NOT EXISTS comparison_variants (
+    run_id       TEXT PRIMARY KEY,
+    group_id     TEXT,
+    model        TEXT,
+    status       TEXT,            -- running | succeeded | failed | skipped
+    cost_usd     REAL DEFAULT 0,
+    tokens_in    INTEGER DEFAULT 0,
+    tokens_out   INTEGER DEFAULT 0,
+    output       TEXT,
+    error        TEXT,
+    started_at   REAL,
+    finished_at  REAL
+);
+CREATE INDEX IF NOT EXISTS idx_cmp_variants_group ON comparison_variants (group_id);
+CREATE TABLE IF NOT EXISTS comparison_proposed_actions (
+    seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id       TEXT,
+    group_id     TEXT,
+    name         TEXT,
+    args_redacted TEXT,           -- JSON, Layer-A redacted
+    hitl         INTEGER DEFAULT 0,
+    created_at   REAL
+);
+CREATE INDEX IF NOT EXISTS idx_cmp_actions_run ON comparison_proposed_actions (run_id);
+CREATE TABLE IF NOT EXISTS comparison_sim_hitl (
+    seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id       TEXT,
+    group_id     TEXT,
+    name         TEXT,
+    args_redacted TEXT,           -- JSON, Layer-A redacted
+    created_at   REAL
+);
+CREATE INDEX IF NOT EXISTS idx_cmp_hitl_run ON comparison_sim_hitl (run_id);
 """
 
 

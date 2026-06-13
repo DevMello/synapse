@@ -135,6 +135,10 @@ class RunContext:
     prompt_vars: dict[str, Any] = field(default_factory=dict)
     env: dict[str, str] = field(default_factory=dict)
     emit: Optional[Callable[[TraceEvent], Awaitable[None]]] = None
+    # Pluggable tool-execution seam for the agentic loop (§4.3). None -> the adapter uses a
+    # DefaultToolExecutor. The §10 comparison group executor injects a draft-mode shim here
+    # so side-effecting tool calls are simulated, not executed.
+    tool_executor: Optional[Any] = None  # runtime.tools.ToolExecutor
 
     async def trace(self, kind: str, **data: Any) -> None:
         if self.emit is not None:
