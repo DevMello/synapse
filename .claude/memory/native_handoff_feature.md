@@ -7,8 +7,8 @@ a sequential **baton-pass** along a human-pre-approved chain on ONE daemon (no c
 no fan-out), authored on a bespoke **Flow Canvas**. Built inline by the coordinator (worktree
 subagents can't run shell here — see [[web_supabase_migration]] /batch note).
 
-**Schema:** migration `0019_native_handoff` (NOT yet applied to live `gpxfylwhwdsswbgicgby`
-— no CLI/PG access from this env; maintainer must apply, same as 0015). `agent_flows`
+**Schema:** migration `0019_native_handoff` **APPLIED to live `gpxfylwhwdsswbgicgby`** (2026-06-13
+via the Supabase MCP, alongside 0018 + 0020, to bring live in sync with `main`). `agent_flows`
 (editable canvas design: nodes/edges/settings jsonb, status draft/published, published_grant_id),
 `agent_chain_grants` (signed edge graph compiled on publish), `runs` += hop/handoff_mode/flow_id.
 RLS: flows member read+write; chain grants member-read / service-role-write. Reuses §2's

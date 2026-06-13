@@ -14,10 +14,11 @@ re-run, not a replay; E5 API agents only in v1.
 
 **Schema:** migration `0020_comparison_runs` **APPLIED to live `gpxfylwhwdsswbgicgby`** (2026-06-13,
 via the Supabase MCP `apply_migration`; security advisors show no new issues — run_groups has RLS +
-policies). `synapse_web/src/lib/database.types.ts` updated with the run_groups table + the
-runs/tool_calls/hitl_requests columns (spliced by hand, NOT a full regenerate: regenerating from live
-drops the §11 handoff types because 0017/0018/0019 are still unapplied to live — the repo types are
-intentionally ahead of live). `run_groups` (agent_id, daemon_id, input
+policies). At the same time **0018 (command_signing) + 0019 (native_handoff) were applied to live**
+to bring the schema fully in sync with `main` (0017 mfa_recovery was already present out-of-band;
+0015 too). `synapse_web/src/lib/database.types.ts` is now a **clean `generate_typescript_types`
+regenerate** from live (includes run_groups + comparison columns AND the §11 handoff
+agent_flows/agent_chain_grants/runs.hop types — they all exist in live now). `run_groups` (agent_id, daemon_id, input
 jsonb, selected_models[], status running/ready_for_review/closed, winner_run_id, total_cost_usd,
 group_cost_cap, max_parallel_variants); `runs +=` run_group_id/variant_model/is_winner/mode(normal|
 comparison_variant); `tool_calls +=` simulated/proposed_action; `hitl_requests +=` simulated. RLS:
@@ -83,9 +84,11 @@ agent_id can't be resolved (runs.agent_id is NOT NULL); (3) select_winner clear-
   not load-bearing). LIVE end-to-end over a real daemon still needs the `comparison` capability bound
   per-run by the engine (same deferred wiring as §2's MCP) + DB-integration endpoint tests. To demo
   offline, move `synapse_web/.env` aside (MOCK).
-- **Do NOT** run a full `generate_typescript_types` against live and overwrite database.types.ts: live
-  lacks 0017/0018/0019, so a clean regenerate DROPS the handoff (`agent_flows`, `runs.hop`, …) types and
-  breaks `tsc`. Splice new tables/columns by hand until 0017–0019 are also applied to live.
+- Live is now in sync with `main` (0015–0020 all present), so a clean `generate_typescript_types`
+  regenerate is safe — it no longer drops the §11 handoff types. (History gotcha for next time: live had
+  been modified out-of-band — 0017's tables existed but weren't in the migration history, and 0018/0019
+  were missing — so always `execute_sql` against information_schema to check what actually exists before
+  applying, and use `IF NOT EXISTS` guards.)
 - `comparison.variant_finished` carries proposed_actions/tool_calls so the cloud can populate
   `tool_calls` rows (simulated/proposed_action) — the web reads those from Supabase for the columns.
 

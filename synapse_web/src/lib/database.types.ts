@@ -83,6 +83,183 @@ export type Database = {
           },
         ]
       }
+      agent_chain_grants: {
+        Row: {
+          chain_budget_usd: number
+          created_at: string
+          daemon_id: string
+          edges: Json
+          expires_at: string
+          flow_id: string | null
+          granted_by: string | null
+          id: string
+          key_id: string | null
+          max_hops: number
+          max_payload_bytes: number
+          modes: string[]
+          org_id: string
+          revoked_at: string | null
+          routing: string
+          signature: string | null
+        }
+        Insert: {
+          chain_budget_usd?: number
+          created_at?: string
+          daemon_id: string
+          edges?: Json
+          expires_at: string
+          flow_id?: string | null
+          granted_by?: string | null
+          id?: string
+          key_id?: string | null
+          max_hops?: number
+          max_payload_bytes?: number
+          modes?: string[]
+          org_id: string
+          revoked_at?: string | null
+          routing?: string
+          signature?: string | null
+        }
+        Update: {
+          chain_budget_usd?: number
+          created_at?: string
+          daemon_id?: string
+          edges?: Json
+          expires_at?: string
+          flow_id?: string | null
+          granted_by?: string | null
+          id?: string
+          key_id?: string | null
+          max_hops?: number
+          max_payload_bytes?: number
+          modes?: string[]
+          org_id?: string
+          revoked_at?: string | null
+          routing?: string
+          signature?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_chain_grants_daemon_id_fkey"
+            columns: ["daemon_id"]
+            isOneToOne: false
+            referencedRelation: "daemon_overview"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_chain_grants_daemon_id_fkey"
+            columns: ["daemon_id"]
+            isOneToOne: false
+            referencedRelation: "daemons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_chain_grants_flow_id_fkey"
+            columns: ["flow_id"]
+            isOneToOne: false
+            referencedRelation: "agent_flows"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_chain_grants_granted_by_fkey"
+            columns: ["granted_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_chain_grants_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_flows: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          daemon_id: string | null
+          edges: Json
+          id: string
+          name: string
+          nodes: Json
+          org_id: string
+          published_grant_id: string | null
+          settings: Json
+          status: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          daemon_id?: string | null
+          edges?: Json
+          id?: string
+          name?: string
+          nodes?: Json
+          org_id: string
+          published_grant_id?: string | null
+          settings?: Json
+          status?: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          daemon_id?: string | null
+          edges?: Json
+          id?: string
+          name?: string
+          nodes?: Json
+          org_id?: string
+          published_grant_id?: string | null
+          settings?: Json
+          status?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_flows_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_flows_daemon_id_fkey"
+            columns: ["daemon_id"]
+            isOneToOne: false
+            referencedRelation: "daemon_overview"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_flows_daemon_id_fkey"
+            columns: ["daemon_id"]
+            isOneToOne: false
+            referencedRelation: "daemons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_flows_grant_fk"
+            columns: ["published_grant_id"]
+            isOneToOne: false
+            referencedRelation: "agent_chain_grants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_flows_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agent_identities: {
         Row: {
           agent_id: string
@@ -250,111 +427,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      agent_flows: {
-        Row: {
-          created_at: string
-          created_by: string | null
-          daemon_id: string | null
-          edges: Json
-          id: string
-          name: string
-          nodes: Json
-          org_id: string
-          published_grant_id: string | null
-          settings: Json
-          status: string
-          updated_at: string
-          version: number
-        }
-        Insert: {
-          created_at?: string
-          created_by?: string | null
-          daemon_id?: string | null
-          edges?: Json
-          id?: string
-          name?: string
-          nodes?: Json
-          org_id: string
-          published_grant_id?: string | null
-          settings?: Json
-          status?: string
-          updated_at?: string
-          version?: number
-        }
-        Update: {
-          created_at?: string
-          created_by?: string | null
-          daemon_id?: string | null
-          edges?: Json
-          id?: string
-          name?: string
-          nodes?: Json
-          org_id?: string
-          published_grant_id?: string | null
-          settings?: Json
-          status?: string
-          updated_at?: string
-          version?: number
-        }
-        Relationships: []
-      }
-      agent_chain_grants: {
-        Row: {
-          chain_budget_usd: number
-          created_at: string
-          daemon_id: string
-          edges: Json
-          expires_at: string
-          flow_id: string | null
-          granted_by: string | null
-          id: string
-          key_id: string | null
-          max_hops: number
-          max_payload_bytes: number
-          modes: string[]
-          org_id: string
-          revoked_at: string | null
-          routing: string
-          signature: string | null
-        }
-        Insert: {
-          chain_budget_usd?: number
-          created_at?: string
-          daemon_id: string
-          edges?: Json
-          expires_at: string
-          flow_id?: string | null
-          granted_by?: string | null
-          id?: string
-          key_id?: string | null
-          max_hops?: number
-          max_payload_bytes?: number
-          modes?: string[]
-          org_id: string
-          revoked_at?: string | null
-          routing?: string
-          signature?: string | null
-        }
-        Update: {
-          chain_budget_usd?: number
-          created_at?: string
-          daemon_id?: string
-          edges?: Json
-          expires_at?: string
-          flow_id?: string | null
-          granted_by?: string | null
-          id?: string
-          key_id?: string | null
-          max_hops?: number
-          max_payload_bytes?: number
-          modes?: string[]
-          org_id?: string
-          revoked_at?: string | null
-          routing?: string
-          signature?: string | null
-        }
-        Relationships: []
       }
       agent_orchestration_grants: {
         Row: {
@@ -1274,6 +1346,24 @@ export type Database = {
           },
         ]
       }
+      job_leases: {
+        Row: {
+          job: string
+          locked_until: string
+          updated_at: string
+        }
+        Insert: {
+          job: string
+          locked_until?: string
+          updated_at?: string
+        }
+        Update: {
+          job?: string
+          locked_until?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       logs: {
         Row: {
           agent_id: string | null
@@ -1764,6 +1854,41 @@ export type Database = {
           },
         ]
       }
+      org_security_policy: {
+        Row: {
+          created_at: string
+          mfa_grace_until: string | null
+          org_id: string
+          require_mfa: boolean
+          step_up_max_age: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          mfa_grace_until?: string | null
+          org_id: string
+          require_mfa?: boolean
+          step_up_max_age?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          mfa_grace_until?: string | null
+          org_id?: string
+          require_mfa?: boolean
+          step_up_max_age?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "org_security_policy_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organizations: {
         Row: {
           created_at: string
@@ -1902,6 +2027,30 @@ export type Database = {
         }
         Relationships: []
       }
+      recovery_codes: {
+        Row: {
+          code_hash: string
+          created_at: string
+          id: string
+          used_at: string | null
+          user_id: string
+        }
+        Insert: {
+          code_hash: string
+          created_at?: string
+          id?: string
+          used_at?: string | null
+          user_id: string
+        }
+        Update: {
+          code_hash?: string
+          created_at?: string
+          id?: string
+          used_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       run_checkpoints: {
         Row: {
           cost_so_far_usd: number
@@ -2027,7 +2176,28 @@ export type Database = {
             foreignKeyName: "run_groups_agent_id_fkey"
             columns: ["agent_id"]
             isOneToOne: false
+            referencedRelation: "agent_overview"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "run_groups_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
             referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "run_groups_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "run_groups_daemon_id_fkey"
+            columns: ["daemon_id"]
+            isOneToOne: false
+            referencedRelation: "daemon_overview"
             referencedColumns: ["id"]
           },
           {
@@ -2174,6 +2344,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "runs_flow_id_fkey"
+            columns: ["flow_id"]
+            isOneToOne: false
+            referencedRelation: "agent_flows"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "runs_initiator_agent_id_fkey"
             columns: ["initiator_agent_id"]
             isOneToOne: false
@@ -2194,6 +2371,13 @@ export type Database = {
             referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "runs_run_group_id_fkey"
+            columns: ["run_group_id"]
+            isOneToOne: false
+            referencedRelation: "run_groups"
+            referencedColumns: ["id"]
+          },
         ]
       }
       schedules: {
@@ -2207,6 +2391,7 @@ export type Database = {
           kind: Database["public"]["Enums"]["schedule_kind"]
           org_id: string
           run_at: string | null
+          schedule_auth: Json | null
         }
         Insert: {
           agent_id: string
@@ -2218,6 +2403,7 @@ export type Database = {
           kind: Database["public"]["Enums"]["schedule_kind"]
           org_id: string
           run_at?: string | null
+          schedule_auth?: Json | null
         }
         Update: {
           agent_id?: string
@@ -2229,6 +2415,7 @@ export type Database = {
           kind?: Database["public"]["Enums"]["schedule_kind"]
           org_id?: string
           run_at?: string | null
+          schedule_auth?: Json | null
         }
         Relationships: [
           {
@@ -2398,22 +2585,28 @@ export type Database = {
       }
       users: {
         Row: {
+          command_public_key: string | null
           created_at: string
           display_name: string | null
           email: string | null
           id: string
+          mfa_enrolled: boolean
         }
         Insert: {
+          command_public_key?: string | null
           created_at?: string
           display_name?: string | null
           email?: string | null
           id: string
+          mfa_enrolled?: boolean
         }
         Update: {
+          command_public_key?: string | null
           created_at?: string
           display_name?: string | null
           email?: string | null
           id?: string
+          mfa_enrolled?: boolean
         }
         Relationships: []
       }
